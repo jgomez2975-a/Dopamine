@@ -692,7 +692,7 @@ extern char **environ;
 
 - (NSString *)injectionRulesPath
 {
-    return [NSString stringWithUTF8String:JBROOT_PATH("/var/mobile/Library/Preferences/.DopamineInjectionRules.plist")];
+    return @"/var/mobile/Library/Preferences/.DopamineInjectionRules.plist";
 }
 
 - (NSDictionary *)injectionRules
@@ -746,7 +746,7 @@ extern char **environ;
 
 - (NSString *)appHideRulesPath
 {
-    return [NSString stringWithUTF8String:JBROOT_PATH("/var/mobile/Library/Preferences/.DopamineAppHideRules.plist")];
+    return @"/var/mobile/Library/Preferences/.DopamineAppHideRules.plist";
 }
 
 - (NSDictionary *)appHideRules
