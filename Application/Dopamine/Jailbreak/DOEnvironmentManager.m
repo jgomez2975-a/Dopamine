@@ -775,9 +775,30 @@ extern char **environ;
     return NO;
 }
 
+- (BOOL)writeAppHideRules:(NSDictionary *)rules
+{
+    NSString *path = [self appHideRulesPath];
+    NSString *directory = [path stringByDeletingLastPathComponent];
+    NSError *error = nil;
+    if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:&error]) {
+        NSLog(@"[AppHide] failed to create preferences directory %@: %@", directory, error);
+        return NO;
+    }
+
+    if (![rules writeToFile:path atomically:YES]) {
+        NSLog(@"[AppHide] failed to persist rules to %@", path);
+        return NO;
+    }
+    chmod(path.fileSystemRepresentation, 0644);
+    return YES;
+}
+
 - (void)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID
 {
-    if (!bundleID) return;
+    if (!bundleID.length) return;
 
     NSMutableDictionary *rules = [[self appHideRules] mutableCopy];
     if (hidden) {
@@ -788,9 +809,7 @@ extern char **environ;
         [rules removeObjectForKey:bundleID];
     }
 
-    NSString *path = [self appHideRulesPath];
-    [rules writeToFile:path atomically:YES];
-    chmod(path.fileSystemRepresentation, 0644);
+    [self writeAppHideRules:rules];
 
     NSLog(@"[AppHide] %@ -> %@", bundleID, hidden ? @"hidden" : @"visible");
 }
@@ -809,9 +828,7 @@ extern char **environ;
     }
     rules[bundleID] = appRule;
 
-    NSString *path = [self appHideRulesPath];
-    [rules writeToFile:path atomically:YES];
-    chmod(path.fileSystemRepresentation, 0644);
+    [self writeAppHideRules:rules];
 
     NSLog(@"[AppHide] %@ no-inject -> %@", bundleID, noInject ? @"on" : @"off");
 }
