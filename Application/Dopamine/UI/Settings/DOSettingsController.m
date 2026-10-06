@@ -1092,6 +1092,16 @@
     [self.tableView addGestureRecognizer:longPress];
 }
 
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    // Re-read persisted rules whenever the picker becomes visible.  This keeps
+    // the switch state authoritative even when the controller is reused.
+    if (self.allApps.count > 0) {
+        [self loadInstalledApps];
+    }
+}
+
 - (void)donePressed
 {
     [self.navigationController popViewControllerAnimated:YES];
@@ -1099,6 +1109,9 @@
 
 - (void)loadInstalledApps
 {
+    [self.allApps removeAllObjects];
+    [self.filteredApps removeAllObjects];
+
     Class LSApplicationWorkspace_class = objc_getClass("LSApplicationWorkspace");
     if (!LSApplicationWorkspace_class) return;
 
