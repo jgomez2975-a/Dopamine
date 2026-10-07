@@ -369,15 +369,6 @@ static void app_hide_do_hide(void)
 	// files" under /var/mobile/Library). Pure file-rename, no uicache.
 	app_hide_run_jbctl("audit", "hide");
 
-	// Hide security.mac.amfi.developer_mode_status (kernel storage -> 0) so a
-	// bare app can't detect the jailbreak via the iOS 17 developer-mode flag.
-	// This is the launchd-side counterpart of the in-process hidejb sysctl hook
-	// and of DOEnvironmentManager's manual hide: no-inject apps run with NO
-	// injection, so the sysctl is NOT hidden in-process and must be toggled
-	// globally here. Non-fatal: if krw/dev-mode storage is unavailable it logs
-	// and continues (same guard as the app-side setJailbreakHidden:).
-	app_hide_run_jbctl("devmode", "hide");
-
 	// Remove the /var/jb symlink last.
 	unlink("/var/jb");
 }
@@ -389,10 +380,6 @@ static void app_hide_do_restore(void)
 		unlink("/var/jb");
 		symlink(jbroot, "/var/jb");
 	}
-
-	// Restore the real developer-mode state (1) that was hidden above. Runs after
-	// /var/jb is re-linked so jbctl is reachable.
-	app_hide_run_jbctl("devmode", "show");
 
 	// Restore the quarantined files, then remount fakelib.
 	app_hide_run_jbctl("audit", "restore");
@@ -419,13 +406,12 @@ bool app_hide_restore_after_userspace_reboot(void)
 
 	// Transient hide leftover. fakelib was already re-mounted by
 	// ensure_fakelib_mounted() during the reboot, so only relink /var/jb and
-	// restore the quarantined files + developer-mode flag.
+	// restore the quarantined files.
 	NSFileManager *fm = [NSFileManager defaultManager];
 	NSString *jbRootPath = [NSString stringWithUTF8String:jbroot];
 	[fm removeItemAtPath:@"/var/jb" error:nil];
 	[fm createSymbolicLinkAtPath:@"/var/jb" withDestinationPath:jbRootPath error:nil];
 
-	app_hide_run_jbctl("devmode", "show");
 	app_hide_run_jbctl("audit", "restore");
 	return true;
 }
