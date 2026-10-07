@@ -333,7 +333,8 @@ void app_hide_init(void)
 // RootHide-style "no-injection" mode: temporary global hide + bare spawn
 // ---------------------------------------------------------------------------
 
-// Reference-counted state for concurrent NoInject foreground apps.
+static const char *kHideStatePath = "/var/mobile/Library/Preferences/.DopamineHideState.plist";
+
 static bool gNoInjectActive = false;
 static int gNoInjectRefCount = 0;
 static pthread_mutex_t gNoInjectLock = PTHREAD_MUTEX_INITIALIZER;
