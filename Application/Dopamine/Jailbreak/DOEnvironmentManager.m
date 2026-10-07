@@ -12,7 +12,9 @@
 #import <sys/mount.h>
 #import <sys/utsname.h>
 #import <sys/stat.h>
-#import <unistd.h>
+#import <fcntl.h>
+#import <errno.h>
+#import <string.h>
 #import <mach-o/dyld.h>
 #import <libgrabkernel2/libgrabkernel2.h>
 #import <libjailbreak/info.h>
@@ -791,9 +793,11 @@ extern char **environ;
     [self runAsRoot:^{
         [self runUnsandboxed:^{
             NSString *path = [self appHideRulesPath];
+            NSString *dir = [path stringByDeletingLastPathComponent];
+            NSString *tmp = [NSString stringWithFormat:@"%@.tmp.%d", path, getpid()];
             NSError *error = nil;
             NSData *data = [NSPropertyListSerialization dataWithPropertyList:rules
-                                                                      format:NSPropertyListXMLFormat_v1_0
+                                                                      format:NSPropertyListBinaryFormat_v1_0
                                                                      options:0
                                                                        error:&error];
             if (!data) {
@@ -801,13 +805,41 @@ extern char **environ;
                 return;
             }
 
-            if (![data writeToFile:path options:NSDataWritingAtomic error:&error]) {
-                NSLog(@"[AppHide] failed to write %@: %@", path, error.localizedDescription);
+            // Do not use NSDataWritingAtomic here. On iOS 17 the temporary file
+            // is created with the mobile process' credentials before the root
+            // transition is visible to Foundation, so the write can appear to
+            // succeed in memory but never replace the real plist.
+            [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                                       withIntermediateDirectories:YES
+                                                        attributes:nil
+                                                             error:&error];
+            int fd = open(tmp.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd < 0) {
+                NSLog(@"[AppHide] open %@ failed: %s", tmp, strerror(errno));
+                return;
+            }
+            ssize_t left = (ssize_t)data.length;
+            const uint8_t *bytes = data.bytes;
+            while (left > 0) {
+                ssize_t n = write(fd, bytes, (size_t)left);
+                if (n <= 0) break;
+                bytes += n;
+                left -= n;
+            }
+            fchmod(fd, 0644);
+            fsync(fd);
+            close(fd);
+
+            if (left != 0 || rename(tmp.fileSystemRepresentation, path.fileSystemRepresentation) != 0) {
+                NSLog(@"[AppHide] rename %@ -> %@ failed: %s", tmp, path, strerror(errno));
+                unlink(tmp.fileSystemRepresentation);
                 return;
             }
 
-            chmod(path.fileSystemRepresentation, 0644);
-            success = YES;
+            // Verify the on-disk plist, not merely the in-memory dictionary.
+            NSDictionary *check = [NSDictionary dictionaryWithContentsOfFile:path];
+            success = [check isEqualToDictionary:rules];
+            if (!success) NSLog(@"[AppHide] verification failed for %@", path);
         }];
     }];
     return success;

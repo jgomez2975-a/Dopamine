@@ -32,6 +32,7 @@ void app_hide_watch_exit(pid_t pid);
 // is running), spawning a jailbreak app (under /var/jb/) restores the jailbreak
 // so the jailbreak app can run. No re-hide on exit (accepted limitation).
 bool app_hide_is_currently_hidden(void);
+void app_hide_recover_if_needed(void);
 bool app_hide_is_jailbreak_app(const char *path);
 
 // Settings.app (stock /Applications/Preferences.app) behaves like a jailbreak

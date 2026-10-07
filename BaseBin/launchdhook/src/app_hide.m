@@ -27,6 +27,9 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/mount.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <time.h>
 
 #include <libjailbreak/libjailbreak.h>
 #include <xpc_private.h>
@@ -43,9 +46,9 @@ extern void systemwide_domain_set_enabled(bool enabled);
 // compiled into launchdhook as well.
 bool string_has_prefix(const char *str, const char *prefix);
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
+static void app_hide_log(NSString *msg);
+static void app_hide_run_jbctl(const char *command, const char *arg);
+
 
 static int proc_get_pidversion(pid_t pid)
 {
@@ -330,9 +333,44 @@ void app_hide_init(void)
 // RootHide-style "no-injection" mode: temporary global hide + bare spawn
 // ---------------------------------------------------------------------------
 
-static bool gNoInjectActive = false;
-static int gNoInjectRefCount = 0;
-static pthread_mutex_t gNoInjectLock = PTHREAD_MUTEX_INITIALIZER;
+static const char *kHideStatePath = "/var/mobile/Library/Preferences/.DopamineHideState.plist";
+
+static void app_hide_write_state(bool hidden)
+{
+	NSDictionary *state = @{ @"Hidden": @(hidden), @"PID": @(getpid()), @"Time": @((long long)time(NULL)) };
+	NSData *data = [NSPropertyListSerialization dataWithPropertyList:state format:NSPropertyListBinaryFormat_v1_0 options:0 error:NULL];
+	if (!data) return;
+	NSString *tmp = [NSString stringWithFormat:@"%s.tmp", kHideStatePath];
+	int fd = open(tmp.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (fd < 0) return;
+	const uint8_t *p = data.bytes; ssize_t left = (ssize_t)data.length;
+	while (left > 0) { ssize_t n = write(fd, p, (size_t)left); if (n <= 0) break; p += n; left -= n; }
+	fsync(fd); close(fd);
+	if (left == 0) rename(tmp.fileSystemRepresentation, kHideStatePath);
+	else unlink(tmp.fileSystemRepresentation);
+}
+
+static void app_hide_clear_state(void)
+{
+	unlink(kHideStatePath);
+}
+
+void app_hide_recover_if_needed(void)
+{
+	NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:@(kHideStatePath)];
+	if (![state[@"Hidden"] boolValue]) return;
+	// A previous launchd died while the jailbreak was hidden. Restore the symlink,
+	// audit quarantine and fakelib before installing new hooks. This mirrors the
+	// reference package's recover_if_needed path and prevents a boot with /var/jb
+	// missing after a crash or userspace reboot.
+	app_hide_log(@"recover: stale hidden state detected");
+	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+	if (jbroot && jbroot[0]) { unlink("/var/jb"); symlink(jbroot, "/var/jb"); }
+	app_hide_run_jbctl("audit", "restore");
+	app_hide_run_jbctl("fakelib", "mount");
+	app_hide_clear_state();
+}
+
 
 // Pids of jailbreak apps running "resurrected" (restored while the jailbreak was
 // hidden). Killed before the jailbreak is re-hidden so they don't keep writing
@@ -365,6 +403,9 @@ static void app_hide_do_hide(void)
 	// systemhook injection (same proven pattern as ensure_fakelib_mounted()).
 	unmount("/usr/lib", MNT_FORCE);
 
+	// Persist the hidden state before touching the symlink. If launchd dies after
+	// this point, the next launchd instance can restore the environment.
+	app_hide_write_state(true);
 	// Quarantine the jailbreak files a bare app can still see (the "suspicious
 	// files" under /var/mobile/Library). Pure file-rename, no uicache.
 	app_hide_run_jbctl("audit", "hide");
@@ -381,9 +422,9 @@ static void app_hide_do_restore(void)
 		symlink(jbroot, "/var/jb");
 	}
 
-	// Restore the quarantined files, then remount fakelib.
 	app_hide_run_jbctl("audit", "restore");
 	app_hide_run_jbctl("fakelib", "mount");
+	app_hide_clear_state();
 }
 
 void app_hide_global_hide(void)
