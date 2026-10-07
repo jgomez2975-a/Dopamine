@@ -542,6 +542,7 @@ void app_hide_resurrect_for_jb_app(void)
 	pthread_mutex_lock(&gNoInjectLock);
 	bool wasHidden = gNoInjectActive;
 	gNoInjectActive = false;
+	gNoInjectRefCount = 0;
 	pthread_mutex_unlock(&gNoInjectLock);
 	if (!wasHidden) return;
 	app_hide_log(@"resurrect: jailbreak app spawned while hidden, restoring jailbreak");
@@ -682,7 +683,9 @@ void app_hide_watch_exit(pid_t pid)
 	dispatch_source_set_event_handler(source, ^{
 		app_hide_log([NSString stringWithFormat:@"watch_exit: pid %d exited", pid]);
 		app_hide_remove_pid(pid);
-		app_hide_global_restore();
+		// Do not restore here. NoInject is a persistent per-rule mode: the
+		// jailbreak remains hidden after the target exits and is restored only
+		// when a jailbreak app is launched to let the user disable the rule.
 		dispatch_source_cancel(source);
 	});
 	dispatch_resume(source);
