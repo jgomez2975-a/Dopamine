@@ -5,6 +5,7 @@
 #import <libjailbreak/developer_mode_hide.h>
 #import <sys/mount.h>
 #import <libjailbreak/stock_fixes.h>
+#include <string.h>
 
 SInt32 CFUserNotificationDisplayAlert(CFTimeInterval timeout, CFOptionFlags flags, CFURLRef iconURL, CFURLRef soundURL, CFURLRef localizationURL, CFStringRef alertHeader, CFStringRef alertMessage, CFStringRef defaultButtonTitle, CFStringRef alternateButtonTitle, CFStringRef otherButtonTitle, CFOptionFlags *responseFlags) API_AVAILABLE(ios(3.0));
 
@@ -139,6 +140,69 @@ int fakePath_mount(bool mount, const char *path)
 		}
 	}
 	return r;
+}
+
+// ---------------------------------------------------------------------------
+// probe_sysctl: locate the two AMFI sysctl OIDs in the kernel, so we can later
+// swap their handlers (RootHide-style: report developer mode as 0 without
+// touching the real state). Prints everything needed for that swap.
+// ---------------------------------------------------------------------------
+static void probe_sysctl_oids(void)
+{
+	uint64_t base = gSystemInfo.kernelConstant.base;
+	uint64_t scanSize = 0x4000000ULL; // 64 MB from kernel base
+	const char *names[] = {"developer_mode_status", "launch_env_logging", NULL};
+	uint8_t *page = malloc(0x1000);
+	if (!page) { printf("malloc failed\n"); return; }
+
+	for (int n = 0; names[n]; n++) {
+		const char *target = names[n];
+		size_t targetLen = strlen(target);
+		printf("=== search '%s' ===\n", target);
+
+		uint64_t strAddr = 0;
+		for (uint64_t addr = base; addr < base + scanSize; addr += 0x1000) {
+			if (kreadbuf(addr, page, 0x1000) != 0) continue;
+			for (int off = 0; off + (int)targetLen + 1 <= 0x1000; off++) {
+				if (memcmp(page + off, target, targetLen) == 0 && page[off + targetLen] == 0) {
+					strAddr = addr + off;
+					break;
+				}
+			}
+			if (strAddr) break;
+		}
+		if (!strAddr) { printf("  string NOT FOUND in first %llu MB\n", scanSize >> 20); continue; }
+		printf("  string @ 0x%llx\n", (unsigned long long)strAddr);
+
+		int found = 0;
+		for (uint64_t addr = base; addr < base + scanSize && found < 8; addr += 0x1000) {
+			if (kreadbuf(addr, page, 0x1000) != 0) continue;
+			for (int off = 0; off + 8 <= 0x1000; off += 8) {
+				uint64_t val = *(uint64_t *)(page + off);
+				if (val == strAddr) {
+					uint64_t ptrField = addr + off;
+					printf("  oid_name ptr field @ 0x%llx\n", (unsigned long long)ptrField);
+
+					uint8_t raw[128];
+					if (kreadbuf(ptrField - 96, raw, sizeof(raw)) == 0) {
+						printf("    raw[-96 .. +32]: ");
+						for (int i = 0; i < 128; i++) printf("%02x", raw[i]);
+						printf("\n");
+					}
+
+					uint64_t oid = ptrField - 48; // assume oid_name @ +48
+					printf("    assume oid_name@+48 -> oid=0x%llx number=%u kind=0x%x arg1=0x%llx arg2=%d handler=0x%llx\n",
+						   (unsigned long long)oid,
+						   kread32(oid + 24), kread32(oid + 28),
+						   (unsigned long long)kread_ptr(oid + 32), (int)kread32(oid + 40),
+						   (unsigned long long)kread_ptr(oid + 56));
+					found++;
+				}
+			}
+		}
+		if (found == 0) printf("  no pointer to string found\n");
+	}
+	free(page);
 }
 
 int jbctl_handle_internal(const char *command, int argc, char* argv[])
@@ -281,6 +345,14 @@ int jbctl_handle_internal(const char *command, int argc, char* argv[])
 			return r;
 		}
 		return -1;
+	}
+	else if (!strcmp(command, "probe_sysctl")) {
+		if (jbclient_initialize_primitives() != 0) {
+			printf("ERROR: failed to initialize krw primitives\n");
+			return -1;
+		}
+		probe_sysctl_oids();
+		return 0;
 	}
 	return -1;
 }
