@@ -768,15 +768,19 @@ extern char **environ;
 
 - (NSString *)appHideRulesPath
 {
-    // Keep this outside cfprefsd's managed Preferences directory. iOS 17 can
-    // rewrite dot-prefixed files there after the app exits, which caused the
-    // toggle to appear saved until the settings page was reopened.
-    return @"/var/mobile/.DopamineAppHideRules.plist";
+    // Documents is writable by mobile and is not managed by cfprefsd. Keep
+    // the rules there so they survive Dopamine relaunch and preference reload.
+    return @"/var/mobile/Documents/.DopamineAppHideRules.plist";
 }
 
 - (NSString *)legacyAppHideRulesPath
 {
     return @"/var/mobile/Library/Preferences/.DopamineAppHideRules.plist";
+}
+
+- (NSString *)previousAppHideRulesPath
+{
+    return @"/var/mobile/.DopamineAppHideRules.plist";
 }
 
 // Persist the Hide-for-App rules.
@@ -868,7 +872,7 @@ extern char **environ;
 
 - (NSString *)appHideRulesBackupPath
 {
-    return @"/var/mobile/.DopamineAppHideRules.plist.bak";
+    return @"/var/mobile/Documents/.DopamineAppHideRules.plist.bak";
 }
 
 - (NSDictionary *)appHideRules
@@ -876,6 +880,8 @@ extern char **environ;
     NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesPath]];
     if ([rules isKindOfClass:[NSDictionary class]]) return rules;
     rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesBackupPath]];
+    if ([rules isKindOfClass:[NSDictionary class]]) return rules;
+    rules = [NSDictionary dictionaryWithContentsOfFile:[self previousAppHideRulesPath]];
     if ([rules isKindOfClass:[NSDictionary class]]) return rules;
     rules = [NSDictionary dictionaryWithContentsOfFile:[self legacyAppHideRulesPath]];
     return [rules isKindOfClass:[NSDictionary class]] ? rules : @{};
