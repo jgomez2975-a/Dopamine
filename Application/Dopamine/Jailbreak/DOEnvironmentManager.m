@@ -768,9 +768,9 @@ extern char **environ;
 
 - (NSString *)appHideRulesPath
 {
-    // Documents is writable by mobile and is not managed by cfprefsd. Keep
-    // the rules there so they survive Dopamine relaunch and preference reload.
-    return @"/var/mobile/Documents/.DopamineAppHideRules.plist";
+    // The supplied working build uses this shared path for both Dopamine UI
+    // and launchdhook. Keep the writer and runtime reader on the same source.
+    return @"/var/mobile/Library/Preferences/.DopamineAppHideRules.plist";
 }
 
 - (NSString *)legacyAppHideRulesPath
@@ -819,10 +819,7 @@ extern char **environ;
             while (left > 0) { ssize_t n = write(fd,p,left); if (n<=0) break; p+=n; left-=n; }
             fsync(fd); close(fd);
             if (left != 0 || rename(tmp.fileSystemRepresentation,path.fileSystemRepresentation) != 0) { unlink(tmp.fileSystemRepresentation); return; }
-            // Keep the legacy reader in sync, but do not let a legacy-path
-            // failure make the canonical Documents write look unsuccessful.
-            NSString *legacy = [self legacyAppHideRulesPath];
-            [data writeToFile:legacy atomically:YES];
+            // The reference build uses this single shared Preferences path.
             NSDictionary *check = [self readAppHideRulesAtPath:path];
             success = [check isEqualToDictionary:rules];
         }];
@@ -832,7 +829,7 @@ extern char **environ;
 
 - (NSString *)appHideRulesBackupPath
 {
-    return @"/var/mobile/Documents/.DopamineAppHideRules.plist.bak";
+    return @"/var/mobile/Library/Preferences/.DopamineAppHideRules.plist.bak";
 }
 
 - (NSDictionary *)readAppHideRulesAtPath:(NSString *)path
