@@ -1130,6 +1130,17 @@
     [self.tableView addGestureRecognizer:longPress];
 }
 
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+    // The known-good build reloads the persisted app state whenever this page
+    // becomes visible. Without this, a reused controller can retain the initial
+    // in-memory switch values and show every rule as disabled after relaunch.
+    if (self.allApps.count > 0) {
+        [self loadInstalledApps];
+    }
+}
+
 - (void)donePressed
 {
     [self.navigationController popViewControllerAnimated:YES];
@@ -1143,6 +1154,13 @@
     NSObject *workspace = [LSApplicationWorkspace_class performSelector:NSSelectorFromString(@"defaultWorkspace")];
     NSArray *allApps = [workspace performSelector:NSSelectorFromString(@"allApplications")];
     DOEnvironmentManager *env = [DOEnvironmentManager sharedManager];
+    // Read the persisted rules once per page load. The previous implementation
+    // called the manager separately for every app, which made a relaunch race
+    // with the hidden environment and could produce an all-off in-memory list
+    // even though the plist still contained the rules.
+    NSDictionary *persistedRules = [env appHideRules] ?: @{};
+    [self.allApps removeAllObjects];
+    [self.filteredApps removeAllObjects];
 
     for (id app in allApps) {
         NSString *bundleID = [app valueForKey:@"applicationIdentifier"];
@@ -1150,8 +1168,9 @@
         if (!bundleID || !name) continue;
         if ([bundleID hasPrefix:@"com.apple."]) continue;
 
-        BOOL hidden = [env isEnvironmentHiddenForBundleID:bundleID];
-        BOOL noInject = [env isEnvironmentNoInjectForBundleID:bundleID];
+        NSDictionary *rule = persistedRules[bundleID];
+        BOOL hidden = [rule[@"HideEnvironment"] boolValue];
+        BOOL noInject = [rule[@"HideNoInject"] boolValue];
         [self.allApps addObject:[@{
             @"bundleID": bundleID,
             @"name": name,
