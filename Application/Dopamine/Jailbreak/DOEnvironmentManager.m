@@ -783,45 +783,29 @@ extern char **environ;
     return @"/var/mobile/.DopamineAppHideRules.plist";
 }
 
-// Persist the Hide-for-App rules.
-//
-// Two problems this fixes:
-//
-// 1. The result of the write used to be ignored, so a failed write looked exactly
-//    like a successful toggle: the switch flipped, the UI updated, and the next
-//    launch read the old file back.
-//
-// 2. This was the only place that touched /var/mobile/Library/Preferences without
-//    running as root and unsandboxed first, unlike every other filesystem call
-//    here. That directory belongs to cfprefsd; on iOS 16 the write happened to
-//    succeed anyway, on iOS 17 it is rejected.
-//
-// The atomic write (temp file + rename) is kept because a plain truncating write
-// would leave a half-written plist if the process died mid-write, and launchdhook
-// reads this file on every spawn - a torn read there is much worse than a rename.
 - (BOOL)writeAppHideRules:(NSDictionary *)rules
 {
+    // Match the user's known-good IPA: prepare the target directory under the
+    // same root/unsandboxed context, then let Foundation serialize the plist
+    // atomically. Avoid the custom binary write/rename pipeline, which differs
+    // from the proven implementation and may not round-trip like its reader.
     __block BOOL success = NO;
     [self runAsRoot:^{
         [self runUnsandboxed:^{
             NSString *path = [self appHideRulesPath];
             NSString *dir = [path stringByDeletingLastPathComponent];
             NSError *error = nil;
-            NSData *data = [NSPropertyListSerialization dataWithPropertyList:rules
-                                                                      format:NSPropertyListBinaryFormat_v1_0
-                                                                     options:0
-                                                                       error:&error];
-            if (!data) return;
-            NSString *tmp = [path stringByAppendingFormat:@".tmp.%d", getpid()];
-            int fd = open(tmp.fileSystemRepresentation, O_WRONLY|O_CREAT|O_TRUNC, 0644);
-            if (fd < 0) return;
-            ssize_t left = data.length; const uint8_t *p = data.bytes;
-            while (left > 0) { ssize_t n = write(fd,p,left); if (n<=0) break; p+=n; left-=n; }
-            fsync(fd); close(fd);
-            if (left != 0 || rename(tmp.fileSystemRepresentation,path.fileSystemRepresentation) != 0) { unlink(tmp.fileSystemRepresentation); return; }
-            // The reference build uses this single shared Preferences path.
-            NSDictionary *check = [self readAppHideRulesAtPath:path];
-            success = [check isEqualToDictionary:rules];
+            BOOL made = [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                                                  withIntermediateDirectories:YES
+                                                                   attributes:nil
+                                                                        error:&error];
+            if (!made && ![[NSFileManager defaultManager] fileExistsAtPath:dir]) {
+                NSLog(@"[AppHide] create directory failed: %@", error.localizedDescription);
+                return;
+            }
+            success = [rules writeToFile:path atomically:YES];
+            if (success) chmod(path.fileSystemRepresentation, 0644);
+            else NSLog(@"[AppHide] Foundation plist write failed: %@", path);
         }];
     }];
     return success;
@@ -832,37 +816,11 @@ extern char **environ;
     return @"/var/mobile/Library/Preferences/.DopamineAppHideRules.plist.bak";
 }
 
-- (NSDictionary *)readAppHideRulesAtPath:(NSString *)path
-{
-    NSData *data = [NSData dataWithContentsOfFile:path options:0 error:nil];
-    if (!data.length) return nil;
-    NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
-    id object = [NSPropertyListSerialization propertyListWithData:data
-                                                           options:NSPropertyListImmutable
-                                                            format:&format
-                                                             error:nil];
-    return [object isKindOfClass:[NSDictionary class]] ? object : nil;
-}
-
 - (NSDictionary *)appHideRules
 {
-    NSArray<NSString *> *paths = @[[self appHideRulesPath],
-                                   [self appHideRulesBackupPath],
-                                   [self previousAppHideRulesPath],
-                                   [self legacyAppHideRulesPath]];
-    NSMutableDictionary *merged = [NSMutableDictionary dictionary];
-    // Merge rather than returning the first readable file: an older copy may
-    // contain only a subset of rules after an interrupted upgrade.
-    for (NSString *path in [paths reverseObjectEnumerator]) {
-        NSDictionary *rules = [self readAppHideRulesAtPath:path];
-        if (rules.count) [merged addEntriesFromDictionary:rules];
-    }
-    if (merged.count) {
-        NSLog(@"[AppHide] loaded %lu persisted rules", (unsigned long)merged.count);
-        return merged;
-    }
-    NSLog(@"[AppHide] no persisted rules found");
-    return @{};
+    // Match the known-good IPA's exact reader and canonical file path.
+    NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesPath]];
+    return [rules isKindOfClass:[NSDictionary class]] ? rules : @{};
 }
 
 - (BOOL)isEnvironmentHiddenForBundleID:(NSString *)bundleID
