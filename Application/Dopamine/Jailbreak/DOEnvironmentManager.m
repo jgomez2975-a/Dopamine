@@ -806,80 +806,25 @@ extern char **environ;
         [self runUnsandboxed:^{
             NSString *path = [self appHideRulesPath];
             NSString *dir = [path stringByDeletingLastPathComponent];
-            NSString *tmp = [NSString stringWithFormat:@"%@.tmp.%d", path, getpid()];
             NSError *error = nil;
             NSData *data = [NSPropertyListSerialization dataWithPropertyList:rules
                                                                       format:NSPropertyListBinaryFormat_v1_0
                                                                      options:0
                                                                        error:&error];
-            if (!data) {
-                NSLog(@"[AppHide] failed to serialise rules: %@", error.localizedDescription);
-                return;
-            }
-
-            // Do not use NSDataWritingAtomic here. On iOS 17 the temporary file
-            // is created with the mobile process' credentials before the root
-            // transition is visible to Foundation, so the write can appear to
-            // succeed in memory but never replace the real plist.
-            [[NSFileManager defaultManager] createDirectoryAtPath:dir
-                                       withIntermediateDirectories:YES
-                                                        attributes:nil
-                                                             error:&error];
-            int fd = open(tmp.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-            if (fd < 0) {
-                NSLog(@"[AppHide] open %@ failed: %s", tmp, strerror(errno));
-                return;
-            }
-            ssize_t left = (ssize_t)data.length;
-            const uint8_t *bytes = data.bytes;
-            while (left > 0) {
-                ssize_t n = write(fd, bytes, (size_t)left);
-                if (n <= 0) break;
-                bytes += n;
-                left -= n;
-            }
-            fchmod(fd, 0644);
-            fsync(fd);
-            close(fd);
-
-            if (left != 0 || rename(tmp.fileSystemRepresentation, path.fileSystemRepresentation) != 0) {
-                NSLog(@"[AppHide] rename %@ -> %@ failed: %s", tmp, path, strerror(errno));
-                unlink(tmp.fileSystemRepresentation);
-                return;
-            }
-
-            // Keep a second complete copy. This protects the selection from
-            // cfprefsd/launchd races or a plist replacement during userspace
-            // reboot; reads fall back to it when the primary is absent/corrupt.
-            NSString *backup = [self appHideRulesBackupPath];
-            NSData *backupData = [NSData dataWithContentsOfFile:path];
-            if (backupData) {
-                NSString *backupTmp = [NSString stringWithFormat:@"%@.tmp.%d", backup, getpid()];
-                if ([backupData writeToFile:backupTmp atomically:NO]) {
-                    rename(backupTmp.fileSystemRepresentation, backup.fileSystemRepresentation);
-                    chmod(backup.fileSystemRepresentation, 0644);
-                }
-            }
-
-            // Write the canonical rules to both the durable Documents location
-            // and the legacy location. Some iOS 17 userspace services reload the
-            // old path during app relaunch; keeping both copies identical avoids
-            // a stale legacy plist winning after cfprefsd refreshes.
+            if (!data) return;
+            NSString *tmp = [path stringByAppendingFormat:@".tmp.%d", getpid()];
+            int fd = open(tmp.fileSystemRepresentation, O_WRONLY|O_CREAT|O_TRUNC, 0644);
+            if (fd < 0) return;
+            ssize_t left = data.length; const uint8_t *p = data.bytes;
+            while (left > 0) { ssize_t n = write(fd,p,left); if (n<=0) break; p+=n; left-=n; }
+            fsync(fd); close(fd);
+            if (left != 0 || rename(tmp.fileSystemRepresentation,path.fileSystemRepresentation) != 0) { unlink(tmp.fileSystemRepresentation); return; }
+            // Keep the legacy reader in sync, but do not let a legacy-path
+            // failure make the canonical Documents write look unsuccessful.
             NSString *legacy = [self legacyAppHideRulesPath];
-            NSString *legacyTmp = [NSString stringWithFormat:@"%@.tmp.%d", legacy, getpid()];
-            int lfd = open(legacyTmp.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-            if (lfd >= 0) {
-                const uint8_t *lp = data.bytes; ssize_t ll = (ssize_t)data.length;
-                while (ll > 0) { ssize_t n = write(lfd, lp, (size_t)ll); if (n <= 0) break; lp += n; ll -= n; }
-                fchmod(lfd, 0644); fsync(lfd); close(lfd);
-                if (ll == 0) rename(legacyTmp.fileSystemRepresentation, legacy.fileSystemRepresentation);
-                else unlink(legacyTmp.fileSystemRepresentation);
-            }
-
-            // Verify the on-disk plist, not merely the in-memory dictionary.
-            NSDictionary *check = [NSDictionary dictionaryWithContentsOfFile:path];
+            [data writeToFile:legacy atomically:YES];
+            NSDictionary *check = [self readAppHideRulesAtPath:path];
             success = [check isEqualToDictionary:rules];
-            if (!success) NSLog(@"[AppHide] verification failed for %@", path);
         }];
     }];
     return success;
@@ -890,16 +835,37 @@ extern char **environ;
     return @"/var/mobile/Documents/.DopamineAppHideRules.plist.bak";
 }
 
+- (NSDictionary *)readAppHideRulesAtPath:(NSString *)path
+{
+    NSData *data = [NSData dataWithContentsOfFile:path options:0 error:nil];
+    if (!data.length) return nil;
+    NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
+    id object = [NSPropertyListSerialization propertyListWithData:data
+                                                           options:NSPropertyListImmutable
+                                                            format:&format
+                                                             error:nil];
+    return [object isKindOfClass:[NSDictionary class]] ? object : nil;
+}
+
 - (NSDictionary *)appHideRules
 {
-    NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesPath]];
-    if ([rules isKindOfClass:[NSDictionary class]]) return rules;
-    rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesBackupPath]];
-    if ([rules isKindOfClass:[NSDictionary class]]) return rules;
-    rules = [NSDictionary dictionaryWithContentsOfFile:[self previousAppHideRulesPath]];
-    if ([rules isKindOfClass:[NSDictionary class]]) return rules;
-    rules = [NSDictionary dictionaryWithContentsOfFile:[self legacyAppHideRulesPath]];
-    return [rules isKindOfClass:[NSDictionary class]] ? rules : @{};
+    NSArray<NSString *> *paths = @[[self appHideRulesPath],
+                                   [self appHideRulesBackupPath],
+                                   [self previousAppHideRulesPath],
+                                   [self legacyAppHideRulesPath]];
+    NSMutableDictionary *merged = [NSMutableDictionary dictionary];
+    // Merge rather than returning the first readable file: an older copy may
+    // contain only a subset of rules after an interrupted upgrade.
+    for (NSString *path in [paths reverseObjectEnumerator]) {
+        NSDictionary *rules = [self readAppHideRulesAtPath:path];
+        if (rules.count) [merged addEntriesFromDictionary:rules];
+    }
+    if (merged.count) {
+        NSLog(@"[AppHide] loaded %lu persisted rules", (unsigned long)merged.count);
+        return merged;
+    }
+    NSLog(@"[AppHide] no persisted rules found");
+    return @{};
 }
 
 - (BOOL)isEnvironmentHiddenForBundleID:(NSString *)bundleID
