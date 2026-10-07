@@ -836,6 +836,19 @@ extern char **environ;
                 return;
             }
 
+            // Keep a second complete copy. This protects the selection from
+            // cfprefsd/launchd races or a plist replacement during userspace
+            // reboot; reads fall back to it when the primary is absent/corrupt.
+            NSString *backup = [self appHideRulesBackupPath];
+            NSData *backupData = [NSData dataWithContentsOfFile:path];
+            if (backupData) {
+                NSString *backupTmp = [NSString stringWithFormat:@"%@.tmp.%d", backup, getpid()];
+                if ([backupData writeToFile:backupTmp atomically:NO]) {
+                    rename(backupTmp.fileSystemRepresentation, backup.fileSystemRepresentation);
+                    chmod(backup.fileSystemRepresentation, 0644);
+                }
+            }
+
             // Verify the on-disk plist, not merely the in-memory dictionary.
             NSDictionary *check = [NSDictionary dictionaryWithContentsOfFile:path];
             success = [check isEqualToDictionary:rules];
@@ -845,10 +858,18 @@ extern char **environ;
     return success;
 }
 
+- (NSString *)appHideRulesBackupPath
+{
+    return @"/var/mobile/Library/Preferences/.DopamineAppHideRules.plist.bak";
+}
+
 - (NSDictionary *)appHideRules
 {
-    NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesPath]];
-    return rules ?: @{};
+    NSString *path = [self appHideRulesPath];
+    NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:path];
+    if ([rules isKindOfClass:[NSDictionary class]]) return rules;
+    rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesBackupPath]];
+    return [rules isKindOfClass:[NSDictionary class]] ? rules : @{};
 }
 
 - (BOOL)isEnvironmentHiddenForBundleID:(NSString *)bundleID
