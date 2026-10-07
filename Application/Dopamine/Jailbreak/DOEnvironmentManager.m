@@ -751,7 +751,12 @@ extern char **environ;
 
 - (NSDictionary *)appHideRules
 {
-    NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesPath]];
+    __block NSDictionary *rules = nil;
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesPath]];
+        }];
+    }];
     return rules ?: @{};
 }
 
@@ -777,23 +782,29 @@ extern char **environ;
 
 - (BOOL)writeAppHideRules:(NSDictionary *)rules
 {
-    NSString *path = [self appHideRulesPath];
-    NSString *directory = [path stringByDeletingLastPathComponent];
-    NSError *error = nil;
-    if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
-                                  withIntermediateDirectories:YES
-                                                   attributes:nil
-                                                        error:&error]) {
-        NSLog(@"[AppHide] failed to create preferences directory %@: %@", directory, error);
-        return NO;
-    }
+    __block BOOL success = NO;
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            NSString *path = [self appHideRulesPath];
+            NSString *directory = [path stringByDeletingLastPathComponent];
+            NSError *error = nil;
+            if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:&error]) {
+                NSLog(@"[AppHide] failed to create preferences directory %@: %@", directory, error);
+                return;
+            }
 
-    if (![rules writeToFile:path atomically:YES]) {
-        NSLog(@"[AppHide] failed to persist rules to %@", path);
-        return NO;
-    }
-    chmod(path.fileSystemRepresentation, 0644);
-    return YES;
+            if (![rules writeToFile:path atomically:YES]) {
+                NSLog(@"[AppHide] failed to persist rules to %@", path);
+                return;
+            }
+            chmod(path.fileSystemRepresentation, 0644);
+            success = YES;
+        }];
+    }];
+    return success;
 }
 
 - (void)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID
