@@ -37,8 +37,8 @@ extern void systemwide_domain_set_enabled(bool enabled);
 
 #define INJECTION_RULES_PATH "/var/mobile/Library/Preferences/.DopamineInjectionRules.plist"
 
-#define APP_HIDE_RULES_PATH "/var/mobile/Documents/.DopamineAppHideRules.plist"
-#define LEGACY_APP_HIDE_RULES_PATH "/var/mobile/Library/Preferences/.DopamineAppHideRules.plist"
+#define APP_HIDE_RULES_PATH "/var/mobile/Library/Preferences/.DopamineAppHideRules.plist"
+#define LEGACY_APP_HIDE_RULES_PATH "/var/mobile/Documents/.DopamineAppHideRules.plist"
 #define PREVIOUS_APP_HIDE_RULES_PATH "/var/mobile/.DopamineAppHideRules.plist"
 
 static bool should_hide_environment(const char *executablePath)
