@@ -861,6 +861,21 @@ extern char **environ;
                 }
             }
 
+            // Write the canonical rules to both the durable Documents location
+            // and the legacy location. Some iOS 17 userspace services reload the
+            // old path during app relaunch; keeping both copies identical avoids
+            // a stale legacy plist winning after cfprefsd refreshes.
+            NSString *legacy = [self legacyAppHideRulesPath];
+            NSString *legacyTmp = [NSString stringWithFormat:@"%@.tmp.%d", legacy, getpid()];
+            int lfd = open(legacyTmp.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (lfd >= 0) {
+                const uint8_t *lp = data.bytes; ssize_t ll = (ssize_t)data.length;
+                while (ll > 0) { ssize_t n = write(lfd, lp, (size_t)ll); if (n <= 0) break; lp += n; ll -= n; }
+                fchmod(lfd, 0644); fsync(lfd); close(lfd);
+                if (ll == 0) rename(legacyTmp.fileSystemRepresentation, legacy.fileSystemRepresentation);
+                else unlink(legacyTmp.fileSystemRepresentation);
+            }
+
             // Verify the on-disk plist, not merely the in-memory dictionary.
             NSDictionary *check = [NSDictionary dictionaryWithContentsOfFile:path];
             success = [check isEqualToDictionary:rules];
