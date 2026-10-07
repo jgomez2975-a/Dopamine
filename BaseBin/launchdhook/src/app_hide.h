@@ -50,4 +50,10 @@ void app_hide_track_jailbreak_app(pid_t pid);
 // background refreshes/pushes from leaving the jailbreak hidden.
 void app_hide_check_role_after_spawn(pid_t pid);
 
+// Restore the jailbreak after a userspace reboot that happened while a no-inject
+// app was running (the launchd-side restore never fired because launchd was
+// killed). Returns true if a leftover transient hide was restored; false if the
+// jailbreak is manually hidden and must stay hidden.
+bool app_hide_restore_after_userspace_reboot(void);
+
 #endif // APP_HIDE_H
