@@ -6,6 +6,7 @@
 #import <sys/mount.h>
 #import <libjailbreak/stock_fixes.h>
 #include <string.h>
+#include <sys/sysctl.h>
 
 SInt32 CFUserNotificationDisplayAlert(CFTimeInterval timeout, CFOptionFlags flags, CFURLRef iconURL, CFURLRef soundURL, CFURLRef localizationURL, CFStringRef alertHeader, CFStringRef alertMessage, CFStringRef defaultButtonTitle, CFStringRef alternateButtonTitle, CFStringRef otherButtonTitle, CFOptionFlags *responseFlags) API_AVAILABLE(ios(3.0));
 
@@ -147,62 +148,90 @@ int fakePath_mount(bool mount, const char *path)
 // swap their handlers (RootHide-style: report developer mode as 0 without
 // touching the real state). Prints everything needed for that swap.
 // ---------------------------------------------------------------------------
+static uint64_t probe_find_oid(const char *shortName, uint64_t base, uint64_t scanSize, uint64_t *nameStrOut)
+{
+	size_t targetLen = strlen(shortName);
+	uint8_t *page = malloc(0x1000);
+	*nameStrOut = 0;
+	if (!page) return 0;
+
+	uint64_t strAddr = 0;
+	for (uint64_t addr = base; addr < base + scanSize; addr += 0x1000) {
+		if (kreadbuf(addr, page, 0x1000) != 0) continue;
+		for (int off = 0; off + (int)targetLen + 1 <= 0x1000; off++) {
+			if (memcmp(page + off, shortName, targetLen) == 0 && page[off + targetLen] == 0) {
+				strAddr = addr + off;
+				break;
+			}
+		}
+		if (strAddr) break;
+	}
+	if (!strAddr) { free(page); return 0; }
+
+	uint64_t oid = 0;
+	for (uint64_t addr = base; addr < base + scanSize && !oid; addr += 0x1000) {
+		if (kreadbuf(addr, page, 0x1000) != 0) continue;
+		for (int off = 0; off + 8 <= 0x1000; off += 8) {
+			if (*(uint64_t *)(page + off) == strAddr) {
+				oid = addr + off - 48; // oid_name @ +48
+				*nameStrOut = strAddr;
+				break;
+			}
+		}
+	}
+	free(page);
+	return oid;
+}
+
+static int probe_read_int(const char *name)
+{
+	int val = -999;
+	size_t len = sizeof(val);
+	sysctlbyname(name, &val, &len, NULL, 0);
+	return val;
+}
+
 static void probe_sysctl_oids(void)
 {
 	uint64_t base = gSystemInfo.kernelConstant.base;
+	uint64_t slide = gSystemInfo.kernelConstant.slide;
 	uint64_t scanSize = 0x4000000ULL; // 64 MB from kernel base
-	const char *names[] = {"developer_mode_status", "launch_env_logging", NULL};
-	uint8_t *page = malloc(0x1000);
-	if (!page) { printf("malloc failed\n"); return; }
 
-	for (int n = 0; names[n]; n++) {
-		const char *target = names[n];
-		size_t targetLen = strlen(target);
-		printf("=== search '%s' ===\n", target);
+	printf("base=0x%llx slide=0x%llx\n", (unsigned long long)base, (unsigned long long)slide);
+	fflush(stdout);
 
-		uint64_t strAddr = 0;
-		for (uint64_t addr = base; addr < base + scanSize; addr += 0x1000) {
-			if (kreadbuf(addr, page, 0x1000) != 0) continue;
-			for (int off = 0; off + (int)targetLen + 1 <= 0x1000; off++) {
-				if (memcmp(page + off, target, targetLen) == 0 && page[off + targetLen] == 0) {
-					strAddr = addr + off;
-					break;
-				}
-			}
-			if (strAddr) break;
-		}
-		if (!strAddr) { printf("  string NOT FOUND in first %llu MB\n", scanSize >> 20); continue; }
-		printf("  string @ 0x%llx\n", (unsigned long long)strAddr);
+	uint64_t devName = 0, launchName = 0;
+	uint64_t devOid = probe_find_oid("developer_mode_status", base, scanSize, &devName);
+	uint64_t launchOid = probe_find_oid("launch_env_logging", base, scanSize, &launchName);
 
-		int found = 0;
-		for (uint64_t addr = base; addr < base + scanSize && found < 8; addr += 0x1000) {
-			if (kreadbuf(addr, page, 0x1000) != 0) continue;
-			for (int off = 0; off + 8 <= 0x1000; off += 8) {
-				uint64_t val = *(uint64_t *)(page + off);
-				if (val == strAddr) {
-					uint64_t ptrField = addr + off;
-					printf("  oid_name ptr field @ 0x%llx\n", (unsigned long long)ptrField);
+	printf("devOid=0x%llx (off 0x%llx) devNameStr=0x%llx (off 0x%llx)\n",
+		   (unsigned long long)devOid, (unsigned long long)(devOid - base),
+		   (unsigned long long)devName, (unsigned long long)(devName - base));
+	printf("launchOid=0x%llx (off 0x%llx) launchNameStr=0x%llx (off 0x%llx)\n",
+		   (unsigned long long)launchOid, (unsigned long long)(launchOid - base),
+		   (unsigned long long)launchName, (unsigned long long)(launchName - base));
+	fflush(stdout);
 
-					uint8_t raw[128];
-					if (kreadbuf(ptrField - 96, raw, sizeof(raw)) == 0) {
-						printf("    raw[-96 .. +32]: ");
-						for (int i = 0; i < 128; i++) printf("%02x", raw[i]);
-						printf("\n");
-					}
+	if (!devOid || !launchOid) { printf("OID not found, abort swap test\n"); fflush(stdout); return; }
 
-					uint64_t oid = ptrField - 48; // assume oid_name @ +48
-					printf("    assume oid_name@+48 -> oid=0x%llx number=%u kind=0x%x arg1=0x%llx arg2=%d handler=0x%llx\n",
-						   (unsigned long long)oid,
-						   kread32(oid + 24), kread32(oid + 28),
-						   (unsigned long long)kread_ptr(oid + 32), (int)kread32(oid + 40),
-						   (unsigned long long)kread_ptr(oid + 56));
-					found++;
-				}
-			}
-		}
-		if (found == 0) printf("  no pointer to string found\n");
-	}
-	free(page);
+	printf("=== swap test ===\n");
+	printf("  before: devmode_status=%d\n", probe_read_int("security.mac.amfi.developer_mode_status"));
+	fflush(stdout);
+
+	// swap the two oid_name pointers (data pointers, no PAC)
+	kwrite64(devOid + 48, launchName);
+	kwrite64(launchOid + 48, devName);
+
+	printf("  after swap: devmode_status=%d (expect 0)\n", probe_read_int("security.mac.amfi.developer_mode_status"));
+	printf("  after swap: launch_env_logging=%d\n", probe_read_int("security.mac.amfi.launch_env_logging"));
+	fflush(stdout);
+
+	// restore
+	kwrite64(devOid + 48, devName);
+	kwrite64(launchOid + 48, launchName);
+
+	printf("  after restore: devmode_status=%d (expect 1)\n", probe_read_int("security.mac.amfi.developer_mode_status"));
+	fflush(stdout);
 }
 
 int jbctl_handle_internal(const char *command, int argc, char* argv[])
