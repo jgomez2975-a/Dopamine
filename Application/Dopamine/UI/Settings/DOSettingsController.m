@@ -20,6 +20,94 @@
 #import "DOSceneDelegate.h"
 #import "DOPSJetsamListItemsController.h"
 #import "DOButtonCell.h"
+#import <CoreServices/LSApplicationProxy.h>
+#import <CoreServices/LSApplicationWorkspace.h>
+
+@interface DOAppIsolationController : PSListController
+@property (nonatomic, strong) NSArray<LSApplicationProxy *> *applications;
+@end
+
+@implementation DOAppIsolationController
+
+- (NSString *)configPath
+{
+    return JBROOT_PATH(@"/basebin/config.plist");
+}
+
+- (NSMutableDictionary *)mutableConfig
+{
+    NSDictionary *config = [NSDictionary dictionaryWithContentsOfFile:[self configPath]];
+    return config ? [config mutableCopy] : [NSMutableDictionary new];
+}
+
+- (NSString *)executablePathForProxy:(LSApplicationProxy *)proxy
+{
+    if (!proxy.bundleURL.path.length || !proxy.bundleExecutable.length) return nil;
+    return [proxy.bundleURL.path stringByAppendingPathComponent:proxy.bundleExecutable];
+}
+
+- (id)specifiers
+{
+    if (_specifiers) return _specifiers;
+
+    NSMutableArray *apps = [NSMutableArray new];
+    [[LSApplicationWorkspace defaultWorkspace] enumerateApplicationsOfType:0 block:^(LSApplicationProxy *proxy) {
+        NSString *path = [self executablePathForProxy:proxy];
+        if (proxy.installed && path.length && proxy.bundleIdentifier.length &&
+            ![proxy.bundleIdentifier hasPrefix:@"com.apple."] &&
+            ![proxy.bundleIdentifier isEqualToString:NSBundle.mainBundle.bundleIdentifier]) {
+            [apps addObject:proxy];
+        }
+    }];
+    self.applications = [apps sortedArrayUsingComparator:^NSComparisonResult(LSApplicationProxy *a, LSApplicationProxy *b) {
+        NSString *left = a.localizedName ?: a.bundleIdentifier;
+        NSString *right = b.localizedName ?: b.bundleIdentifier;
+        return [left localizedCaseInsensitiveCompare:right];
+    }];
+
+    NSMutableArray *result = [NSMutableArray new];
+    PSSpecifier *group = [PSSpecifier emptyGroupSpecifier];
+    group.name = @"App Isolation";
+    [group setProperty:@"Enabled apps start without Dopamine systemhook or tweak-loader injection. Close the selected app completely before reopening it." forKey:@"footerText"];
+    [result addObject:group];
+
+    for (LSApplicationProxy *proxy in self.applications) {
+        NSString *title = proxy.localizedName ?: proxy.bundleIdentifier;
+        PSSpecifier *item = [PSSpecifier preferenceSpecifierNamed:title target:self set:@selector(setIsolation:specifier:) get:@selector(readIsolation:) detail:nil cell:PSSwitchCell edit:nil];
+        [item setProperty:[self executablePathForProxy:proxy] forKey:@"executablePath"];
+        [item setProperty:proxy.bundleIdentifier forKey:@"bundleIdentifier"];
+        [result addObject:item];
+    }
+    _specifiers = result;
+    return _specifiers;
+}
+
+- (id)readIsolation:(PSSpecifier *)specifier
+{
+    NSArray *blacklist = [[self mutableConfig] objectForKey:@"ProcessBlacklist"];
+    return @([blacklist containsObject:[specifier propertyForKey:@"executablePath"]]);
+}
+
+- (void)setIsolation:(id)value specifier:(PSSpecifier *)specifier
+{
+    NSMutableDictionary *config = [self mutableConfig];
+    NSMutableArray *blacklist = [[config objectForKey:@"ProcessBlacklist"] mutableCopy] ?: [NSMutableArray new];
+    NSString *path = [specifier propertyForKey:@"executablePath"];
+    if ([value boolValue]) {
+        if (![blacklist containsObject:path]) [blacklist addObject:path];
+    } else {
+        [blacklist removeObject:path];
+    }
+    config[@"ProcessBlacklist"] = blacklist;
+    BOOL written = [config writeToFile:[self configPath] atomically:YES];
+    if (!written) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"App Isolation" message:@"Could not update the Dopamine process blacklist." preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+    }
+}
+
+@end
 
 @interface DOSettingsController ()
 
@@ -235,6 +323,12 @@
             [tweakInjectionSpecifier setProperty:@"tweakInjectionEnabled" forKey:@"key"];
             [tweakInjectionSpecifier setProperty:@YES forKey:@"default"];
             [specifiers addObject:tweakInjectionSpecifier];
+
+            if (envManager.isJailbroken) {
+                PSSpecifier *appIsolationSpecifier = [PSSpecifier preferenceSpecifierNamed:@"App Isolation" target:self set:nil get:nil detail:[DOAppIsolationController class] cell:PSLinkCell edit:nil];
+                [appIsolationSpecifier setProperty:@"shield.slash" forKey:@"image"];
+                [specifiers addObject:appIsolationSpecifier];
+            }
             
             if (!envManager.isJailbroken) {
                 PSSpecifier *verboseLogSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Verbose_Logs") target:self set:defSetter get:defGetter detail:nil cell:PSSwitchCell edit:nil];
