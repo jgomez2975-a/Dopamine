@@ -1406,6 +1406,10 @@
         return;
     }
 
+    // Same reason as toggleChanged: the no-inject flag is only read at spawn, so a
+    // live app has to be terminated for the change to be observable.
+    [[DOEnvironmentManager sharedManager] terminateRunningAppWithBundleID:bundleID];
+
     for (NSMutableDictionary *dict in self.allApps) {
         if ([dict[@"bundleID"] isEqualToString:bundleID]) {
             dict[@"noInject"] = @(noInject);
