@@ -442,6 +442,11 @@ void app_hide_start_selfheal(void)
 		const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
 		if (!jbroot || !jbroot[0]) return;
 
+		// Jailbreak must be fully established, otherwise /var/jb is legitimately
+		// absent for a moment during bootstrap and we must not race it.
+		NSString *versionPath = [[NSString stringWithUTF8String:jbroot] stringByAppendingPathComponent:@"basebin/.version"];
+		if (![[NSFileManager defaultManager] fileExistsAtPath:versionPath]) return;
+
 		// A no-inject app is running: hidden on purpose, leave it alone.
 		if (app_hide_is_currently_hidden()) return;
 
