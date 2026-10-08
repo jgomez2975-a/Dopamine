@@ -354,6 +354,14 @@ int hide_global_audit_restore(void)
 	@autoreleasepool {
 		auditLog(@"=== audit restore START ===");
 		restoreHiddenItems();
+        // The global hide unlinks /var/jb, and the jailbreak apps (Sileo, Zebra,
+        // ...) live under /var/jb/Applications: while it was gone SpringBoard
+        // lost their bundles and fell back to white placeholder icons. Simply
+        // re-creating the symlink does not make SpringBoard re-read them. The
+        // app-side restore already runs uicache -a (refreshJailbreakApps); the
+        // no-inject / launchdhook path restores through here and never did, so
+        // the jailbreak store stayed white after a per-app hide.
+        exec_cmd(JBROOT_PATH("/usr/bin/uicache"), "-a", NULL);
 		auditLog(@"=== audit restore END ===");
 	}
 	return 0;
