@@ -14,8 +14,15 @@
 #import <sys/stat.h>
 #import <unistd.h>
 #import <mach-o/dyld.h>
+#import <objc/runtime.h>
 #import <libproc.h>
 #import <signal.h>
+
+// proc_listpids()/proc_pidpath() come from libproc, but the iOS SDK does not
+// expose the PROC_ALL_PIDS selector constant; the XNU value is stable.
+#ifndef PROC_ALL_PIDS
+#define PROC_ALL_PIDS 1
+#endif
 #import <libgrabkernel2/libgrabkernel2.h>
 #import <libjailbreak/info.h>
 #import <libjailbreak/codesign.h>
