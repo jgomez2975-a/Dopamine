@@ -21,6 +21,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (NSArray *)enabledPackageManagers;
 - (id)renderBootLogo;
+- (void)markEnvironmentUpdateStaged;
 
 @end
 
