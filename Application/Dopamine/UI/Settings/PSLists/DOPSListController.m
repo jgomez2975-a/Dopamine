@@ -25,7 +25,7 @@
 + (void)setupViewControllerStyle:(UIViewController*)vc
 {
     DOTheme *theme = [[DOThemeManager sharedInstance] enabledTheme];
-    
+
     vc.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     vc.view.backgroundColor = theme.windowColor;
     vc.view.layer.cornerRadius = 16;

@@ -39,12 +39,20 @@
 - (void)viewDidLoad
 {
     _lastKnownTheme = [[DOThemeManager sharedInstance] enabledTheme].key;
+    _lastKnownMaterial = [DOThemeManager enabledMaterialKey];
     [super viewDidLoad];
 }
 
 - (void)viewWillAppear:(BOOL)arg1
 {
     [super viewWillAppear:arg1];
+    if (_lastKnownMaterial != [DOThemeManager enabledMaterialKey])
+    {
+        // The button fill is applied when DOButtonCell is created, so the rows
+        // have to be rebuilt for a material change to become visible.
+        _lastKnownMaterial = [DOThemeManager enabledMaterialKey];
+        [self reloadSpecifiers];
+    }
     if (_lastKnownTheme != [[DOThemeManager sharedInstance] enabledTheme].key)
     {
         [DOSceneDelegate relaunch];
@@ -130,6 +138,24 @@
 - (NSArray *)themeNames
 {
     return [[DOThemeManager sharedInstance] getAvailableThemeNames];
+}
+
+- (NSArray *)materialIdentifiers
+{
+    return [DOThemeManager getAvailableMaterialKeys];
+}
+
+- (NSArray *)materialNames
+{
+    NSArray *names = [DOThemeManager getAvailableMaterialNames];
+    NSMutableArray *localized = [NSMutableArray arrayWithCapacity:names.count];
+    for (NSString *name in names) {
+        NSString *key = [@"Material_" stringByAppendingString:name];
+        NSString *value = DOLocalizedString(key);
+        // DOLocalizedString returns the key itself when there is no translation.
+        [localized addObject:[value isEqualToString:key] ? name : value];
+    }
+    return localized;
 }
 
 - (NSArray *)jetsamOptionNumbers
@@ -416,6 +442,15 @@
         [themeSpecifier setProperty:@"themeIdentifiers" forKey:@"valuesDataSource"];
         [themeSpecifier setProperty:@"themeNames" forKey:@"titlesDataSource"];
         [specifiers addObject:themeSpecifier];
+
+        PSSpecifier *materialSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Button_Material") target:self set:defSetter get:defGetter detail:nil cell:PSLinkListCell edit:nil];
+        materialSpecifier.detailControllerClass = [DOPSListItemsController class];
+        [materialSpecifier setProperty:@YES forKey:@"enabled"];
+        [materialSpecifier setProperty:@"buttonMaterial" forKey:@"key"];
+        [materialSpecifier setProperty:@"original" forKey:@"default"];
+        [materialSpecifier setProperty:@"materialIdentifiers" forKey:@"valuesDataSource"];
+        [materialSpecifier setProperty:@"materialNames" forKey:@"titlesDataSource"];
+        [specifiers addObject:materialSpecifier];
 
         PSSpecifier *showUptimeSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Show_Uptime") target:self set:defSetter get:defGetter detail:nil cell:PSSwitchCell edit:nil];
         [showUptimeSpecifier setProperty:@YES forKey:@"enabled"];
@@ -1049,9 +1084,11 @@
         self.tableView.sectionHeaderTopPadding = 12;
     }
 
-    UIColor *bg = [DOThemeManager menuColorWithAlpha:0.55];
-    self.view.backgroundColor = bg;
-    self.tableView.backgroundColor = bg;
+    // Use the same page background as the other settings pages, but keep the table
+    // itself clear: an opaque table background paints over the InsetGrouped corner
+    // masking and the app cards lose their rounded outline.
+    [DOPSListController setupViewControllerStyle:self];
+    self.tableView.backgroundColor = [UIColor clearColor];
 
     self.allApps = [NSMutableArray array];
     self.filteredApps = [NSMutableArray array];
@@ -1077,9 +1114,10 @@
     }
     self.searchBar = searchBar;
 
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.tableView.bounds.size.width, 56)];
-    CGFloat searchWidth = MIN(340, header.bounds.size.width - 32);
-    searchBar.frame = CGRectMake((header.bounds.size.width - searchWidth) / 2, 4, searchWidth, 44);
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.tableView.bounds.size.width, 60)];
+    CGFloat screenWidth = CGRectGetWidth([UIScreen mainScreen].bounds);
+    CGFloat searchWidth = MIN(screenWidth - 24, 400);
+    searchBar.frame = CGRectMake((self.tableView.bounds.size.width - searchWidth) / 2, 6, searchWidth, 48);
     searchBar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
     [header addSubview:searchBar];
     self.tableView.tableHeaderView = header;
@@ -1092,16 +1130,6 @@
     [self.tableView addGestureRecognizer:longPress];
 }
 
-- (void)viewWillAppear:(BOOL)animated
-{
-    [super viewWillAppear:animated];
-    // Re-read persisted rules whenever the picker becomes visible.  This keeps
-    // the switch state authoritative even when the controller is reused.
-    if (self.allApps.count > 0) {
-        [self loadInstalledApps];
-    }
-}
-
 - (void)donePressed
 {
     [self.navigationController popViewControllerAnimated:YES];
@@ -1109,9 +1137,6 @@
 
 - (void)loadInstalledApps
 {
-    [self.allApps removeAllObjects];
-    [self.filteredApps removeAllObjects];
-
     Class LSApplicationWorkspace_class = objc_getClass("LSApplicationWorkspace");
     if (!LSApplicationWorkspace_class) return;
 
@@ -1309,18 +1334,37 @@
     NSString *bundleID = appInfo[@"bundleID"];
     BOOL hidden = sender.on;
 
-    [[DOEnvironmentManager sharedManager] setEnvironmentHidden:hidden forBundleID:bundleID];
+    BOOL ok = [[DOEnvironmentManager sharedManager] setEnvironmentHidden:hidden forBundleID:bundleID];
 
     for (NSMutableDictionary *dict in self.allApps) {
         if ([dict[@"bundleID"] isEqualToString:bundleID]) {
-            dict[@"hidden"] = @(hidden);
-            if (!hidden) dict[@"noInject"] = @NO;
+            dict[@"hidden"] = @(ok ? hidden : !hidden);
+            if (ok && !hidden) dict[@"noInject"] = @NO;
             break;
         }
     }
 
+    if (!ok) {
+        // Persisting failed (permissions or a read-only/managed directory), so the
+        // rule did not stick. Put the switch back and say so instead of letting it
+        // look like the app was hidden when it was not.
+        [sender setOn:!hidden animated:YES];
+        [self presentWriteFailureAlert];
+        return;
+    }
+
     UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [fb impactOccurred];
+}
+
+- (void)presentWriteFailureAlert
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"App_Hide_Save_Failed_Title")
+                                                                     message:DOLocalizedString(@"App_Hide_Save_Failed_Message")
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    // Use the system's own cancel title rather than a new localisable string.
+    [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 // Long-press a (hidden) app to toggle "无注入" (RootHide-style no-injection) mode.
@@ -1336,7 +1380,11 @@
     NSString *bundleID = appInfo[@"bundleID"];
 
     BOOL noInject = ![appInfo[@"noInject"] boolValue];
-    [[DOEnvironmentManager sharedManager] setEnvironmentNoInject:noInject forBundleID:bundleID];
+    BOOL ok = [[DOEnvironmentManager sharedManager] setEnvironmentNoInject:noInject forBundleID:bundleID];
+    if (!ok) {
+        [self presentWriteFailureAlert];
+        return;
+    }
 
     for (NSMutableDictionary *dict in self.allApps) {
         if ([dict[@"bundleID"] isEqualToString:bundleID]) {

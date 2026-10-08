@@ -417,8 +417,18 @@ extern char **environ;
 // libraries stay moved away, so the processes that get restarted cannot find the
 // jailbreak they expect. Force the jailbreak back to a fully visible state
 // first. This is a no-op when nothing is hidden.
+//
+// IMPORTANT: this must never run while the jailbreak is still being set up.
+// `finalize` calls rebootUserspace at the very end of a jailbreak run, and
+// DOBootstrapper deletes then re-creates the /var/jb symlink during bootstrap, so
+// a bare "/var/jb is missing" probe can fire right in the middle of that. Calling
+// setJailbreakHidden:NO there is fatal: it spawns jbctl synchronously (with
+// --waitfor) before the jbserver is up, which hangs and ends in a watchdog reboot.
+// The jailbroken flag is the guard: it only turns on once the jailbreak is really
+// established, so before that we never touch the hidden state.
 - (void)ensureJailbreakVisibleBeforeRestart
 {
+    if (!self.isJailbroken) return;
     if (![self isJailbreakHidden]) return;
 
     NSLog(@"[HideJailbreak] Jailbreak is hidden, unhiding before restart");
@@ -434,6 +444,16 @@ extern char **environ;
 - (void)rebootUserspace
 {
     [self ensureJailbreakVisibleBeforeRestart];
+    [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
+}
+
+// Used by the jailbreak flow itself (right after a successful bootstrap). The
+// jailbreak was just created, so it is visible by definition and no unhide is
+// needed - and probing the hidden state here is exactly what used to hang the
+// initialization, because the bootstrapper is still moving the /var/jb symlink
+// around at this point.
+- (void)rebootUserspaceAfterJailbreak
+{
     [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
 }
 
@@ -749,8 +769,58 @@ extern char **environ;
     return @"/var/mobile/Library/Preferences/.DopamineAppHideRules.plist";
 }
 
+// Persist the Hide-for-App rules.
+//
+// Two problems this fixes:
+//
+// 1. The result of the write used to be ignored, so a failed write looked exactly
+//    like a successful toggle: the switch flipped, the UI updated, and the next
+//    launch read the old file back.
+//
+// 2. This was the only place that touched /var/mobile/Library/Preferences without
+//    running as root and unsandboxed first, unlike every other filesystem call
+//    here. That directory belongs to cfprefsd; on iOS 16 the write happened to
+//    succeed anyway, on iOS 17 it is rejected.
+//
+// The atomic write (temp file + rename) is kept because a plain truncating write
+// would leave a half-written plist if the process died mid-write, and launchdhook
+// reads this file on every spawn - a torn read there is much worse than a rename.
+- (BOOL)writeAppHideRules:(NSDictionary *)rules
+{
+    __block BOOL success = NO;
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            NSString *path = [self appHideRulesPath];
+            NSError *error = nil;
+            NSData *data = [NSPropertyListSerialization dataWithPropertyList:rules
+                                                                      format:NSPropertyListXMLFormat_v1_0
+                                                                     options:0
+                                                                       error:&error];
+            if (!data) {
+                NSLog(@"[AppHide] failed to serialise rules: %@", error.localizedDescription);
+                return;
+            }
+
+            if (![data writeToFile:path options:NSDataWritingAtomic error:&error]) {
+                NSLog(@"[AppHide] failed to write %@: %@", path, error.localizedDescription);
+                return;
+            }
+
+            chmod(path.fileSystemRepresentation, 0644);
+            success = YES;
+        }];
+    }];
+    return success;
+}
+
 - (NSDictionary *)appHideRules
 {
+    // Mirror writeAppHideRules: the plist lives in /var/mobile/Library/Preferences,
+    // which on iOS 17+ rejects direct access from the app's own (non-elevated)
+    // context — the write was already fixed to run as root + unsandboxed, but the
+    // read was left plain. A plain read returns nil there, so every re-entry into
+    // the "按 App 隐藏" list looked like nothing was saved. Read it with the same
+    // privileges the write uses.
     __block NSDictionary *rules = nil;
     [self runAsRoot:^{
         [self runUnsandboxed:^{
@@ -780,36 +850,9 @@ extern char **environ;
     return NO;
 }
 
-- (BOOL)writeAppHideRules:(NSDictionary *)rules
+- (BOOL)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID
 {
-    __block BOOL success = NO;
-    [self runAsRoot:^{
-        [self runUnsandboxed:^{
-            NSString *path = [self appHideRulesPath];
-            NSString *directory = [path stringByDeletingLastPathComponent];
-            NSError *error = nil;
-            if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
-                                          withIntermediateDirectories:YES
-                                                           attributes:nil
-                                                                error:&error]) {
-                NSLog(@"[AppHide] failed to create preferences directory %@: %@", directory, error);
-                return;
-            }
-
-            if (![rules writeToFile:path atomically:YES]) {
-                NSLog(@"[AppHide] failed to persist rules to %@", path);
-                return;
-            }
-            chmod(path.fileSystemRepresentation, 0644);
-            success = YES;
-        }];
-    }];
-    return success;
-}
-
-- (void)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID
-{
-    if (!bundleID.length) return;
+    if (!bundleID) return NO;
 
     NSMutableDictionary *rules = [[self appHideRules] mutableCopy];
     if (hidden) {
@@ -820,14 +863,15 @@ extern char **environ;
         [rules removeObjectForKey:bundleID];
     }
 
-    [self writeAppHideRules:rules];
+    BOOL ok = [self writeAppHideRules:rules];
 
-    NSLog(@"[AppHide] %@ -> %@", bundleID, hidden ? @"hidden" : @"visible");
+    NSLog(@"[AppHide] %@ -> %@ (write %@)", bundleID, hidden ? @"hidden" : @"visible", ok ? @"ok" : @"FAILED");
+    return ok;
 }
 
-- (void)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID
+- (BOOL)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID
 {
-    if (!bundleID) return;
+    if (!bundleID) return NO;
 
     NSMutableDictionary *rules = [[self appHideRules] mutableCopy];
     NSMutableDictionary *appRule = [rules[bundleID] mutableCopy] ?: [NSMutableDictionary dictionary];
@@ -839,9 +883,10 @@ extern char **environ;
     }
     rules[bundleID] = appRule;
 
-    [self writeAppHideRules:rules];
+    BOOL ok = [self writeAppHideRules:rules];
 
-    NSLog(@"[AppHide] %@ no-inject -> %@", bundleID, noInject ? @"on" : @"off");
+    NSLog(@"[AppHide] %@ no-inject -> %@ (write %@)", bundleID, noInject ? @"on" : @"off", ok ? @"ok" : @"FAILED");
+    return ok;
 }
 
 - (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs
@@ -1359,11 +1404,28 @@ extern char **environ;
         if ([[NSFileManager defaultManager] fileExistsAtPath:kernelInApp]) {
             return kernelInApp;
         }
-        
+
         [[DOUIManager sharedInstance] sendLog:@"Downloading Kernel" debug:NO];
         NSString *kernelcachePath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/kernelcache"];
-        if (![[NSFileManager defaultManager] fileExistsAtPath:kernelcachePath]) {
+
+        // Re-download whenever the cached file is missing or unusable. A previous
+        // attempt can leave a truncated/empty file behind (interrupted download,
+        // or a build that was not available), and trusting that leftover made the
+        // exploit fail later with a confusing "kernelcache" error instead of
+        // retrying the download.
+        NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:kernelcachePath error:nil];
+        unsigned long long size = [attrs fileSize];
+        if (size < 1024) {
+            [[NSFileManager defaultManager] removeItemAtPath:kernelcachePath error:nil];
             if (grab_images([NSHomeDirectory() stringByAppendingPathComponent:@"Documents"]) == false) return nil;
+        }
+
+        // Verify the download actually produced a usable file before handing the
+        // path to the exploit.
+        attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:kernelcachePath error:nil];
+        if ([attrs fileSize] < 1024) {
+            NSLog(@"[Kernel] kernelcache download produced no usable file");
+            return nil;
         }
         return kernelcachePath;
     }

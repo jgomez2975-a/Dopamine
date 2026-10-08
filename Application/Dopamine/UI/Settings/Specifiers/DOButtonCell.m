@@ -9,6 +9,7 @@
 #import "DOActionMenuButton.h"
 #import "DOGlobalAppearance.h"
 #import "DOUIManager.h"
+#import "DOThemeManager.h"
 
 @implementation DOButtonCell
 
@@ -36,9 +37,9 @@
 
         // The rounded corners were invisible because the button had no fill of its
         // own: against the PSTableCell group background only the hairline border
-        // showed, so the row looked square. Give the button a subtly lighter fill
-        // than the group background so the rounding reads clearly.
-        button.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+        // showed, so the row looked square. Original keeps the stock Dopamine
+        // look (no fill); Custom adds the subtle frosted fill.
+        button.backgroundColor = [DOThemeManager settingsButtonFillColor];
 
         [self.contentView addSubview:button];
 

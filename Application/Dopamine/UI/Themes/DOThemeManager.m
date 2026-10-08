@@ -86,4 +86,39 @@
 }
 
 
+#pragma mark - Button material
+
+// The settings rows are drawn as buttons (DOButtonCell). The stock Dopamine look
+// leaves them unfilled, so only the hairline border shows. "Custom" adds a subtle
+// light fill, which makes the rounded corners read as an actual frosted button.
++ (NSString*)enabledMaterialKey
+{
+    id value = [[DOPreferenceManager sharedManager] preferenceValueForKey:@"buttonMaterial"];
+    if ([value isKindOfClass:[NSString class]] && [value isEqualToString:@"custom"]) {
+        return @"custom";
+    }
+    // Anything unset or unrecognised keeps the stock Dopamine look.
+    return @"original";
+}
+
++ (NSArray*)getAvailableMaterialKeys
+{
+    return @[ @"original", @"custom" ];
+}
+
++ (NSArray*)getAvailableMaterialNames
+{
+    return @[ @"Original", @"Custom" ];
+}
+
+// Fill colour for the settings-row buttons. nil means "no fill", which is the
+// stock Dopamine appearance.
++ (UIColor*)settingsButtonFillColor
+{
+    if ([[DOThemeManager enabledMaterialKey] isEqualToString:@"custom"]) {
+        return [UIColor colorWithWhite:1 alpha:0.08];
+    }
+    return nil;
+}
+
 @end
