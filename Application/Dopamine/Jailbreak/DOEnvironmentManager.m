@@ -14,6 +14,8 @@
 #import <sys/stat.h>
 #import <unistd.h>
 #import <mach-o/dyld.h>
+#import <libproc.h>
+#import <signal.h>
 #import <libgrabkernel2/libgrabkernel2.h>
 #import <libjailbreak/info.h>
 #import <libjailbreak/codesign.h>
