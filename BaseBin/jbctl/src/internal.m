@@ -234,6 +234,49 @@ static void probe_sysctl_oids(void)
 	fflush(stdout);
 }
 
+// RootHide-style developer-mode hiding that does NOT touch the real state:
+// swap the two AMFI sysctl OIDs' name pointers so that
+// sysctlbyname("security.mac.amfi.developer_mode_status") resolves to the
+// launch_env_logging OID (which reads 0), while the real developer-mode storage
+// byte is left untouched. Offsets (relative to the kernel image base) were
+// located with `probe_sysctl` on iPhone 15 Pro Max / iOS 17.0.3.
+#define DEVMODE_DEV_OID_OFF     0x3651ed8ULL
+#define DEVMODE_DEV_NAME_OFF    0x3f189cULL
+#define DEVMODE_LAUNCH_OID_OFF  0x3652068ULL
+#define DEVMODE_LAUNCH_NAME_OFF 0x3f19ebULL
+
+static int devmode_oidswap(bool hide)
+{
+	uint64_t base = gSystemInfo.kernelConstant.base;
+	if (!base) return -1;
+
+	uint64_t devOid     = base + DEVMODE_DEV_OID_OFF;
+	uint64_t devName    = base + DEVMODE_DEV_NAME_OFF;
+	uint64_t launchOid  = base + DEVMODE_LAUNCH_OID_OFF;
+	uint64_t launchName = base + DEVMODE_LAUNCH_NAME_OFF;
+
+	// Sanity-check the offsets before writing: each OID's name pointer must still
+	// be one of the two known strings. If not, the kernel layout differs -> skip
+	// rather than corrupt the sysctl tree.
+	uint64_t curDevName    = kread64(devOid + 48);
+	uint64_t curLaunchName = kread64(launchOid + 48);
+	if ((curDevName != devName && curDevName != launchName) ||
+	    (curLaunchName != launchName && curLaunchName != devName)) {
+		printf("devmode_oidswap: offsets stale (dev=0x%llx launch=0x%llx), skipping\n",
+		       (unsigned long long)curDevName, (unsigned long long)curLaunchName);
+		return -1;
+	}
+
+	if (hide) {
+		kwrite64(devOid + 48, launchName);
+		kwrite64(launchOid + 48, devName);
+	} else {
+		kwrite64(devOid + 48, devName);
+		kwrite64(launchOid + 48, launchName);
+	}
+	return 0;
+}
+
 int jbctl_handle_internal(const char *command, int argc, char* argv[])
 {
 	if (!strcmp(command, "launchd_stash_port")) {
@@ -382,6 +425,14 @@ int jbctl_handle_internal(const char *command, int argc, char* argv[])
 		}
 		probe_sysctl_oids();
 		return 0;
+	}
+	else if (!strcmp(command, "devmode_oidswap")) {
+		if (jbclient_initialize_primitives() != 0) {
+			printf("ERROR: failed to initialize krw primitives\n");
+			return -1;
+		}
+		bool hide = (argc > 1 && !strcmp(argv[1], "on"));
+		return devmode_oidswap(hide);
 	}
 	return -1;
 }
