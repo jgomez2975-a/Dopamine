@@ -63,4 +63,8 @@ bool app_hide_restore_after_userspace_reboot(void);
 // repairs it within ~10 seconds. Must be called once from launchd.
 void app_hide_start_selfheal(void);
 
+// Cheap fast path called from the spawn hook on every process spawn: a single
+// bool read normally, and a repair only if a hide's restore was missed.
+void app_hide_maybe_heal(void);
+
 #endif // APP_HIDE_H
