@@ -201,7 +201,13 @@ static void restoreHiddenItems(void)
 		NSString *src = entry[@"src"];
 		NSString *dst = entry[@"dst"];
 		if (!src || !dst) continue;
-		if ([fm fileExistsAtPath:src]) continue;
+		if ([fm fileExistsAtPath:src]) {
+            // The system can recreate the path (an empty cache dir, a fresh
+            // prefs plist) while hidden. Skipping here used to orphan the
+            // quarantined original, which was then lost for good (white
+            // Sileo/Zebra icons, vanished tweak prefs).
+            [fm removeItemAtPath:src error:nil];
+        }
 
 		[fm createDirectoryAtPath:[src stringByDeletingLastPathComponent]
 	      withIntermediateDirectories:YES
@@ -256,7 +262,7 @@ static void runJailbreakLibraryAudit(void)
 			@"default": @"blacklist",
 			@"whitelistRegex": @[@"^com\\.apple\\.", @"^TelephonyUI-\\d+$", @"^FamilyMarquee.*Mode-.*\\.png$"],
 			@"whitelist": @[@"CloudKit", @"GameKit", @"GeoServices", @"FamilyCircle", @"PassKit", @"VoiceServices", @"VoiceTrigger", @"Backup", @"ssu"],
-			@"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra", @"Cephei", @"com.apple.Terminal", @"GDFileManagerCache.sqlite", @"GDFileManagerCache.sqlite-shm", @"GDFileManagerCache.sqlite-wal", @"ImageTables", @"SentryCrash", @"io.sentry", @"com.hackemist.SDImageCache"]
+			@"blacklist": @[@"com.opa334.Dopamine", @"com.tigisoftware.Filza", @"org.coolstar.SileoStore", @"ws.hbang.Terminal", @"xyz.willy.Zebra", @"Cephei", @"com.apple.Terminal", @"GDFileManagerCache.sqlite", @"GDFileManagerCache.sqlite-shm", @"GDFileManagerCache.sqlite-wal", @"SentryCrash", @"io.sentry", @"com.hackemist.SDImageCache"]
 		},
 		@"/var/mobile/Library/Saved Application State": @{
 			@"default": @"blacklist",
