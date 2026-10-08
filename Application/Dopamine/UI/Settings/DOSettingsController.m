@@ -51,14 +51,17 @@
     if (_specifiers) return _specifiers;
 
     NSMutableArray *apps = [NSMutableArray new];
-    [[LSApplicationWorkspace defaultWorkspace] enumerateApplicationsOfType:0 block:^(LSApplicationProxy *proxy) {
+    LSApplicationWorkspace *workspace = [LSApplicationWorkspace defaultWorkspace];
+    NSArray *installedApplications = [workspace allInstalledApplications];
+    if (!installedApplications.count) installedApplications = [workspace allApplications];
+    for (LSApplicationProxy *proxy in installedApplications) {
         NSString *path = [self executablePathForProxy:proxy];
         if (proxy.installed && path.length && proxy.bundleIdentifier.length &&
             ![proxy.bundleIdentifier hasPrefix:@"com.apple."] &&
             ![proxy.bundleIdentifier isEqualToString:NSBundle.mainBundle.bundleIdentifier]) {
             [apps addObject:proxy];
         }
-    }];
+    }
     self.applications = [apps sortedArrayUsingComparator:^NSComparisonResult(LSApplicationProxy *a, LSApplicationProxy *b) {
         NSString *left = a.localizedName ?: a.bundleIdentifier;
         NSString *right = b.localizedName ?: b.bundleIdentifier;
