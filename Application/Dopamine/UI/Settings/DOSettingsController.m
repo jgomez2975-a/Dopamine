@@ -102,9 +102,11 @@
         [blacklist removeObject:path];
     }
     xpc_object_t values = xpc_array_create(NULL, 0);
-    for (NSString *entry in blacklist) xpc_array_append_string(values, entry.UTF8String);
+    for (NSUInteger index = 0; index < blacklist.count; index++) {
+        NSString *entry = blacklist[index];
+        xpc_array_set_string(values, index, entry.UTF8String);
+    }
     int result = jbclient_platform_jbsettings_set("ProcessBlacklist", values);
-    xpc_release(values);
     BOOL written = (result == 0);
     if (!written) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"App Isolation" message:@"Could not update the Dopamine process blacklist." preferredStyle:UIAlertControllerStyleAlert];
