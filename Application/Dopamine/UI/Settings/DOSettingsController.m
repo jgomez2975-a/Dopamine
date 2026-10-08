@@ -1367,6 +1367,12 @@
         return;
     }
 
+    // The hide decision is latched at process start (spawn_hook writes
+    // DOPAMINE_APP_HIDE, hidejb_init() reads it once), so an app that is merely
+    // suspended would keep its old state forever. Terminate it so the next launch
+    // reads the rule we just wrote - otherwise unchecking appears to do nothing.
+    [[DOEnvironmentManager sharedManager] terminateRunningAppWithBundleID:bundleID];
+
     UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [fb impactOccurred];
 }
