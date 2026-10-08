@@ -511,6 +511,9 @@ extern char **environ;
     NSString *newBasebinTarPath = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:@"basebin.tar"];
     int result = jbclient_platform_stage_jailbreak_update(newBasebinTarPath.fileSystemRepresentation);
     if (result == 0) {
+        // Remember which bundled basebin was just staged: DOUIManager uses this to
+        // fire the automatic environment update exactly once per basebin build.
+        [[DOUIManager sharedInstance] markEnvironmentUpdateStaged];
         [self rebootUserspace];
         return nil;
     }
