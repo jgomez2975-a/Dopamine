@@ -603,6 +603,19 @@ static NSString *app_hide_bundle_id(const char *path)
 	return result;
 }
 
+// The Dopamine app itself is TrollStore-installed under /var/containers/Bundle/
+// Application, i.e. NOT under the jailbreak root, so app_hide_is_jailbreak_app()
+// does not match it. It must still resurrect: while hidden the dev-mode OID swap
+// makes security.mac.amfi.developer_mode_status report 0, and Dopamine requires
+// developer mode, so iOS prompted "Enable Developer Mode" on every open.
+bool app_hide_is_dopamine_app(const char *path)
+{
+    if (!path) return false;
+    if (!strstr(path, ".app/")) return false;
+    static NSString *dopamineBundleID = @"com.opa334.Dopamine";
+    return [app_hide_bundle_id(path) isEqualToString:dopamineBundleID];
+}
+
 // The Settings app (Preferences.app, stock path /Applications/Preferences.app)
 // is effectively a jailbreak app: it is where every tweak's settings bundle is
 // listed from (/var/jb/Library/PreferenceBundles + PreferencePanes). While the
