@@ -6,6 +6,7 @@
 #import <sys/mount.h>
 #import <libjailbreak/stock_fixes.h>
 #include <string.h>
+#include <stdarg.h>
 #include <sys/sysctl.h>
 
 SInt32 CFUserNotificationDisplayAlert(CFTimeInterval timeout, CFOptionFlags flags, CFURLRef iconURL, CFURLRef soundURL, CFURLRef localizationURL, CFStringRef alertHeader, CFStringRef alertMessage, CFStringRef defaultButtonTitle, CFStringRef alternateButtonTitle, CFStringRef otherButtonTitle, CFOptionFlags *responseFlags) API_AVAILABLE(ios(3.0));
@@ -245,9 +246,21 @@ static void probe_sysctl_oids(void)
 #define DEVMODE_LAUNCH_OID_OFF  0x3652068ULL
 #define DEVMODE_LAUNCH_NAME_OFF 0x3f19ebULL
 
+static void oidswap_log(const char *fmt, ...)
+{
+	FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
+	if (!f) return;
+	va_list ap;
+	va_start(ap, fmt);
+	vfprintf(f, fmt, ap);
+	va_end(ap);
+	fclose(f);
+}
+
 static int devmode_oidswap(bool hide)
 {
 	uint64_t base = gSystemInfo.kernelConstant.base;
+	oidswap_log("oidswap: enter hide=%d base=0x%llx\n", hide, (unsigned long long)base);
 	if (!base) return -1;
 
 	uint64_t devOid     = base + DEVMODE_DEV_OID_OFF;
@@ -260,8 +273,12 @@ static int devmode_oidswap(bool hide)
 	// rather than corrupt the sysctl tree.
 	uint64_t curDevName    = kread64(devOid + 48);
 	uint64_t curLaunchName = kread64(launchOid + 48);
+	oidswap_log("oidswap: cur dev=0x%llx launch=0x%llx | want dev=0x%llx launch=0x%llx\n",
+	            (unsigned long long)curDevName, (unsigned long long)curLaunchName,
+	            (unsigned long long)devName, (unsigned long long)launchName);
 	if ((curDevName != devName && curDevName != launchName) ||
 	    (curLaunchName != launchName && curLaunchName != devName)) {
+		oidswap_log("oidswap: sanity FAILED, skipping\n");
 		printf("devmode_oidswap: offsets stale (dev=0x%llx launch=0x%llx), skipping\n",
 		       (unsigned long long)curDevName, (unsigned long long)curLaunchName);
 		return -1;
@@ -274,6 +291,8 @@ static int devmode_oidswap(bool hide)
 		kwrite64(devOid + 48, devName);
 		kwrite64(launchOid + 48, launchName);
 	}
+	oidswap_log("oidswap: applied hide=%d, devmode now=%d\n",
+	            hide, probe_read_int("security.mac.amfi.developer_mode_status"));
 	return 0;
 }
 
@@ -428,10 +447,13 @@ int jbctl_handle_internal(const char *command, int argc, char* argv[])
 	}
 	else if (!strcmp(command, "devmode_oidswap")) {
 		if (jbclient_initialize_primitives() != 0) {
+			oidswap_log("oidswap: krw init FAILED\n");
 			printf("ERROR: failed to initialize krw primitives\n");
 			return -1;
 		}
 		bool hide = (argc > 1 && !strcmp(argv[1], "on"));
+		oidswap_log("oidswap: cmd argc=%d argv1=%s -> hide=%d\n", argc,
+		            (argc > 1 && argv[1]) ? argv[1] : "(none)", hide);
 		return devmode_oidswap(hide);
 	}
 	return -1;
