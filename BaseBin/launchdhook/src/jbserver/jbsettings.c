@@ -1,6 +1,6 @@
 #include "jbsettings.h"
 #include <libjailbreak/info.h>
-#include <libjailbreak/jbclient_xpc.h>
+#include <libjailbreak/jbroot.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <sys/stat.h>
 
@@ -18,9 +18,8 @@ static int persist_process_blacklist(xpc_object_t value)
 	});
 
 	char configPath[PATH_MAX];
-	char *jbroot = jbclient_get_jbroot();
-	if (!jbroot) return -1;
-	snprintf(configPath, sizeof(configPath), "%s/basebin/config.plist", jbroot);
+	const char *rootPath = __jbroot_convert_path("/basebin/config.plist", configPath);
+	if (!rootPath) return -1;
 	CFURLRef url = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault, (const UInt8 *)configPath, strlen(configPath), false);
 	CFMutableDictionaryRef config = NULL;
 	CFDataRef input = NULL;
