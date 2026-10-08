@@ -38,6 +38,12 @@ bool app_hide_is_jailbreak_app(const char *path);
 // app: it lists every tweak's settings from /var/jb/Library/PreferenceBundles,
 // so it must resurrect the jailbreak too.
 bool app_hide_is_settings_app(const char *path);
+
+// The Dopamine app itself (TrollStore-installed, so NOT under /var/jb) must
+// resurrect the jailbreak too: while hidden, the dev-mode OID swap makes
+// security.mac.amfi.developer_mode_status report 0 and Dopamine requires
+// developer mode, so iOS prompted "Enable Developer Mode" on every open.
+bool app_hide_is_dopamine_app(const char *path);
 void app_hide_resurrect_for_jb_app(void);
 
 // Track a jailbreak app's pid after resurrection; it gets killed when the
