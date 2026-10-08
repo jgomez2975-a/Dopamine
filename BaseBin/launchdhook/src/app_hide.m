@@ -428,6 +428,43 @@ bool app_hide_restore_after_userspace_reboot(void)
 	return true;
 }
 
+// Self-heal watchdog (see app_hide.h). Runs every 10s in launchd and repairs a
+// "half hidden" device: /var/jb missing while nothing is actually hidden and no
+// manual hide is active.
+void app_hide_start_selfheal(void)
+{
+	dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+	dispatch_source_set_timer(timer,
+		dispatch_time(DISPATCH_TIME_NOW, 10ull * NSEC_PER_SEC),
+		10ull * NSEC_PER_SEC, 5ull * NSEC_PER_SEC);
+	dispatch_source_set_event_handler(timer, ^{
+		const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+		if (!jbroot || !jbroot[0]) return;
+
+		// A no-inject app is running: hidden on purpose, leave it alone.
+		if (app_hide_is_currently_hidden()) return;
+
+		// Manual "Hide Jailbreak" is on: hidden on purpose, leave it alone.
+		NSString *safeModePath = [[NSString stringWithUTF8String:jbroot] stringByAppendingPathComponent:@"basebin/.safe_mode"];
+		if ([[NSFileManager defaultManager] fileExistsAtPath:safeModePath]) return;
+
+		// /var/jb present: nothing to fix.
+		if (access("/var/jb", F_OK) == 0) return;
+
+		app_hide_log(@"selfheal: /var/jb missing while not hidden -> relinking");
+		NSFileManager *fm = [NSFileManager defaultManager];
+		[fm removeItemAtPath:@"/var/jb" error:nil];
+		[fm createSymbolicLinkAtPath:@"/var/jb"
+		         withDestinationPath:[NSString stringWithUTF8String:jbroot]
+		                       error:nil];
+		app_hide_run_jbctl("devmode_oidswap", "off");
+		app_hide_run_jbctl("audit", "restore");
+		app_hide_run_jbctl("fakelib", "mount");
+	});
+	dispatch_resume(timer);
+}
+
 void app_hide_global_hide(void)
 {
 	// Reference-counted: multiple no-inject apps may run concurrently. The
