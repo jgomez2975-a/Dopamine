@@ -94,7 +94,12 @@
     NSString *jailbrokenVersion = [[DOEnvironmentManager sharedManager] jailbrokenVersion];
     NSString *launchedVersion = [self getLaunchedReleaseTag];
     
-    return [launchedVersion numericalVersionRepresentation] > [jailbrokenVersion numericalVersionRepresentation];
+    // ">" -> ">=": with the stock comparison, a self-built ipa that keeps the same
+    // version string as the already-installed basebin (3.0.10 == 3.0.10) can never
+    // surface the "Update Environment" button, so the bundled basebin.tar could
+    // never be staged and no basebin-side fix ever took effect. Allowing equality
+    // makes the button appear, which is what actually pushes the new basebin.
+    return [launchedVersion numericalVersionRepresentation] >= [jailbrokenVersion numericalVersionRepresentation];
 }
 
 - (bool)launchedReleaseNeedsManualUpdate
