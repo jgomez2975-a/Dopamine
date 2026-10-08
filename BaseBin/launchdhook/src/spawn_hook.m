@@ -182,6 +182,9 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 					   char *const argv[restrict],
 					   char *const envp[restrict])
 {
+	// One bool read in the normal case; repairs a half-hidden device (a hide
+	// whose restore was missed) within a single spawn.
+	app_hide_maybe_heal();
 	if (path) {
 		char executablePath[1024];
 		uint32_t bufsize = sizeof(executablePath);
