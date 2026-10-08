@@ -17,23 +17,7 @@
 {
 	int r = %orig;
 
-	// LaunchServices rebuilds its app database several times during a userspace
-	// reboot, and `uicache -a` can itself trigger further rebuilds. Running the
-	// full icon rebuild on every callback made the jailbreak apps' icons and the
-	// Settings tweak list take a very long time to appear after a reboot, so
-	// serialise the rebuilds on a private queue and debounce them: at most one
-	// `uicache -a` every 15 seconds.
-	static dispatch_queue_t uicacheQueue = NULL;
-	static CFAbsoluteTime lastRebuild = 0;
-	if (!uicacheQueue) {
-		uicacheQueue = dispatch_queue_create("com.opa334.Dopamine.uicache", DISPATCH_QUEUE_SERIAL);
-	}
-
-	dispatch_async(uicacheQueue, ^{
-		CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-		if (now - lastRebuild < 15.0) return;
-		lastRebuild = now;
-
+	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
 		const char *uicachePath = JBROOT_PATH_CSTRING("/usr/bin/uicache");
 		if (!access(uicachePath, F_OK)) {
 			exec_cmd(uicachePath, "-a", NULL);
