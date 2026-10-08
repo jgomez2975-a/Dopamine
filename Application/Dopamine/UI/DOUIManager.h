@@ -33,6 +33,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)shareLogRecordFromView:(UIView *)sourceView;
 - (BOOL)isUpdateAvailable;
 - (BOOL)environmentUpdateAvailable;
+- (NSString *)bundledBasebinToken;
+- (void)markEnvironmentUpdateStaged;
 - (NSArray *)getLatestReleases;
 - (NSString*)getLaunchedReleaseTag;
 - (NSString*)getLatestReleaseTag;
