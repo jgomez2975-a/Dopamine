@@ -102,9 +102,8 @@
         [blacklist removeObject:path];
     }
     xpc_object_t values = xpc_array_create(NULL, 0);
-    for (NSUInteger index = 0; index < blacklist.count; index++) {
-        NSString *entry = blacklist[index];
-        xpc_array_set_string(values, index, entry.UTF8String);
+    for (NSString *entry in blacklist) {
+        xpc_array_set_string(values, XPC_ARRAY_APPEND, entry.UTF8String);
     }
     int result = jbclient_platform_jbsettings_set("ProcessBlacklist", values);
     BOOL written = (result == 0);
