@@ -138,7 +138,17 @@ static kSpawnConfig spawn_config_for_executable(const char* path, char *const ar
 	if (userBlacklist && xpc_get_type(userBlacklist) == XPC_TYPE_ARRAY) {
 		size_t userBlacklistCount = xpc_array_get_count(userBlacklist);
 		for (size_t i = 0; i < userBlacklistCount; i++) {
-			if (!strcmp(xpc_array_get_string(userBlacklist, i), path)) return kSpawnConfigTrust;
+			const char *blacklistedPath = xpc_array_get_string(userBlacklist, i);
+			if (!blacklistedPath) continue;
+
+			// Keep the selected app and every helper/extension inside its .app
+			// bundle completely outside Dopamine's inject and trust paths.
+			if (!strcmp(blacklistedPath, path)) return 0;
+			const char *appSuffix = strstr(blacklistedPath, ".app/");
+			if (appSuffix) {
+				size_t appBundlePrefixLength = (size_t)(appSuffix - blacklistedPath) + strlen(".app/");
+				if (!strncmp(blacklistedPath, path, appBundlePrefixLength)) return 0;
+			}
 		}
 	}
 
