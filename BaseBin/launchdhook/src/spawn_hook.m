@@ -310,7 +310,7 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 	// app too: it lists every tweak's settings from /var/jb/Library/PreferenceBundles,
 	// so with the jailbreak hidden it would show no tweak settings at all.
 	if (path && app_hide_is_currently_hidden()) {
-		bool isJbApp = app_hide_is_jailbreak_app(path);
+		bool isJbApp = app_hide_is_jailbreak_app(path) || app_hide_is_dopamine_app(path);
 		bool isSettings = false;
 		if (!isJbApp) {
 			// Settings must be resurrected on a foreground launch so its tweak
