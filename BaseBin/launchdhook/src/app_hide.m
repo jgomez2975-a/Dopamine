@@ -401,6 +401,18 @@ static void app_hide_do_restore(void)
 	app_hide_run_jbctl("audit", "restore");
 	app_hide_run_jbctl("fakelib", "mount");
 
+	// Rebuild the icon cache from HERE - launchd, root, unsandboxed - and only
+	// after fakelib is back. The global hide unlinks /var/jb, and the jailbreak
+	// apps (Sileo, Zebra, ...) live under /var/jb/Applications, so while it was
+	// gone SpringBoard fell back to white placeholder icons and kept them until a
+	// userspace reboot. Doing this from the jbctl audit-restore call did not take:
+	// that context is sandboxed and it ran before fakelib was remounted. Delay a
+	// little so the restore above is fully settled first.
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2ull * NSEC_PER_SEC),
+		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+			exec_cmd("/var/jb/usr/bin/uicache", "-a", NULL);
+		});
+
 	gHideInFlight = false;
 	gHideStartedAt = 0;
 }
