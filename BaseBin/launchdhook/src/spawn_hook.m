@@ -314,11 +314,19 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 		bool isJbApp = app_hide_is_jailbreak_app(path);
 		bool isSettings = false;
 		if (!isJbApp) {
-			// Settings is only resurrected for a foreground launch, so a background
-			// prewarm can't bring the jailbreak back unexpectedly.
+			// Settings must be resurrected on a foreground launch so its tweak
+			// list (read from /var/jb/Library/PreferenceBundles) is populated.
+			// The darwin role sits at a version-specific offset inside
+			// _posix_spawnattr; if what we read is not a sane role (0..6) the
+			// offset does not match this iOS build, so assume foreground instead
+			// of silently skipping the resurrection (on device that showed up as
+			// "Settings has no tweak entries" from time to time).
 			int settingsRole = -1;
 			if (desc && desc->attrp) {
 				memcpy(&settingsRole, (char *)desc->attrp + 0x58, sizeof(settingsRole));
+			}
+			if (settingsRole < 0 || settingsRole > 6) {
+				settingsRole = 0;
 			}
 			if (settingsRole < 3) {
 				isSettings = app_hide_is_settings_app(path);
@@ -364,6 +372,11 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			int darwinRole = -1;
 			if (desc && desc->attrp) {
 				memcpy(&darwinRole, (char *)desc->attrp + 0x58, sizeof(darwinRole));
+			}
+			// Insane value -> the offset does not match this iOS build; assume a
+			// foreground launch (hide) rather than silently skipping the hide.
+			if (darwinRole < 0 || darwinRole > 6) {
+				darwinRole = 0;
 			}
 			FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
 			if (f) { fprintf(f, "darwin_role=%d\n", darwinRole); fclose(f); }
