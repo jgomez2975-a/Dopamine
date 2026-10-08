@@ -57,8 +57,6 @@ static bool should_hide_environment(const char *executablePath)
         NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:@APP_HIDE_RULES_PATH];
         NSDictionary *appRule = rules[bundleID];
         BOOL hideEnv = [appRule[@"HideEnvironment"] boolValue];
-        FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-        if (f) { fprintf(f, "hide_env: %s = %d\n", bundleID.UTF8String, hideEnv); fclose(f); }
         return hideEnv;
     }
 }
@@ -84,8 +82,6 @@ static bool should_hide_no_inject(const char *executablePath)
         NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:@APP_HIDE_RULES_PATH];
         NSDictionary *appRule = rules[bundleID];
         BOOL noInject = [appRule[@"HideNoInject"] boolValue];
-        FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-        if (f) { fprintf(f, "no_inject: %s = %d\n", bundleID.UTF8String, noInject); fclose(f); }
         return noInject;
     }
 }
@@ -381,8 +377,6 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			if (darwinRole < 0 || darwinRole > 6) {
 				darwinRole = 0;
 			}
-			FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
-			if (f) { fprintf(f, "darwin_role=%d\n", darwinRole); fclose(f); }
 
 			if (darwinRole >= 3) {
 				// Background/non-ui launch: bare spawn (no injection), but no global hide.
