@@ -37,6 +37,13 @@
     return nil;
 }
 
+- (void)markEnvironmentUpdateStaged
+{
+    // Headless BaseBin build: only the app ever stages an environment update, so
+    // there is nothing to remember on this side. Present so DOEnvironmentManager.m
+    // (which is compiled into this binary as well) links.
+}
+
 @end
 
 
