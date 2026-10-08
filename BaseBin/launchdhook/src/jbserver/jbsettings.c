@@ -1,6 +1,5 @@
 #include "jbsettings.h"
 #include <libjailbreak/info.h>
-#include <libjailbreak/jbclient.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <sys/stat.h>
 
