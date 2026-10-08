@@ -716,34 +716,63 @@ static void app_hide_kill_jailbreak_apps(void)
 // Returns the raw app state, or -1 if it can't be queried.
 static int app_hide_get_app_state(pid_t pid)
 {
-	// struct proc_pidappstateinfo is just { uint32_t app_state; }.
+	// Preferred source: struct proc_pidappstateinfo is just { uint32_t app_state; }.
 	uint32_t app_state = 0;
-	if (proc_pidinfo(pid, 22 /* PROC_PIDT_APPSTATE */, 0, &app_state, sizeof(app_state)) != sizeof(app_state)) {
-		return -1;
+	if (proc_pidinfo(pid, 22 /* PROC_PIDT_APPSTATE */, 0, &app_state, sizeof(app_state)) == (int)sizeof(app_state)) {
+		return (int)app_state;
 	}
-	return (int)app_state;
+
+	// Fallback: on some builds PROC_PIDT_APPSTATE returns nothing at all (seen on
+	// device as app_state=-1), which used to make the background detection a
+	// no-op and left the jailbreak hidden after the app was merely backgrounded.
+	// A suspended process (SSTOP) is by definition the backgrounded case, so use
+	// the BSD info status instead.
+	struct proc_bsdinfo bsd = {0};
+	if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsd, sizeof(bsd)) == (int)sizeof(bsd)) {
+		if (bsd.pbi_status == 4 /* SSTOP: suspended */) return 3; // background
+		return 1;                                                 // running/sleeping => foreground
+	}
+	return -1;
 }
 
 void app_hide_check_role_after_spawn(pid_t pid)
 {
 	if (pid <= 0) return;
-	// The app state is assigned shortly after spawn: foreground apps become
-	// PROC_APPSTATE_ACTIVE (1), background apps stay background/suspended/nonui.
-	// Give the system a moment, then undo the hide if this turned out to be a
-	// background launch (so a background refresh doesn't leave the jailbreak
-	// hidden until the app exits).
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC),
-		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-			int appState = app_hide_get_app_state(pid);
-			app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d", pid, appState]);
-			// 1 = PROC_APPSTATE_ACTIVE (foreground). Any other real value (2
-			// inactive / 3 background / 4 suspended / 5 nonui) is a background
-			// launch: undo the hide.
-			if (appState > 0 && appState != 1) {
-				app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d is background, restoring jailbreak", pid]);
-				app_hide_global_restore();
-			}
-		});
+
+	// Poll instead of doing a single check: the global hide must last exactly as
+	// long as the hidden app is in the FOREGROUND. The old one-shot 500ms check
+	// only caught a background *launch*; when the app was backgrounded later
+	// (user returns to the home screen or opens another app) the jailbreak stayed
+	// hidden, so Sileo would not open and Settings showed no tweak entries until
+	// the app was force-quit. First check at 500ms, then every 2s.
+	dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+	dispatch_source_set_timer(timer,
+		dispatch_time(DISPATCH_TIME_NOW, 500ull * NSEC_PER_MSEC),
+		2ull * NSEC_PER_SEC, 500ull * NSEC_PER_MSEC);
+	dispatch_source_set_event_handler(timer, ^{
+		// App gone: app_hide_watch_exit owns the restore.
+		if (!app_hide_is_blacklisted_pid(pid)) {
+			dispatch_source_cancel(timer);
+			return;
+		}
+
+		int appState = app_hide_get_app_state(pid);
+		// Unknown: keep hiding. Being conservative here only risks staying hidden
+		// (which the self-heal can repair), while restoring by mistake would
+		// expose the jailbreak to the app we are hiding it from.
+		if (appState < 0) return;
+
+		app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d", pid, appState]);
+		// 1 = PROC_APPSTATE_ACTIVE (foreground). Anything else means the app is no
+		// longer frontmost -> restore the jailbreak.
+		if (appState != 1) {
+			app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d no longer foreground, restoring jailbreak", pid]);
+			app_hide_global_restore();
+			dispatch_source_cancel(timer);
+		}
+	});
+	dispatch_resume(timer);
 }
 
 void app_hide_watch_exit(pid_t pid)
