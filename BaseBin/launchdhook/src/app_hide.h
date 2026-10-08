@@ -56,4 +56,11 @@ void app_hide_check_role_after_spawn(pid_t pid);
 // jailbreak is manually hidden and must stay hidden.
 bool app_hide_restore_after_userspace_reboot(void);
 
+// Self-heal watchdog: the no-inject hide removes /var/jb and relies on the
+// watch_exit -> restore path to put it back. If that path is ever missed the
+// device is left "half hidden" (/var/jb gone while nothing is actually hidden),
+// which makes Sileo / Terminal / jbctl fail. This timer notices that state and
+// repairs it within ~10 seconds. Must be called once from launchd.
+void app_hide_start_selfheal(void);
+
 #endif // APP_HIDE_H
