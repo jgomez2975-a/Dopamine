@@ -366,7 +366,15 @@ static void app_hide_do_hide(void)
 	// swap): a bare app querying security.mac.amfi.developer_mode_status then
 	// gets 0, while the real developer-mode storage stays untouched so the
 	// jailbreak and developer-signed apps keep working. Undone in do_restore.
-	app_hide_run_jbctl("devmode_oidswap", "on");
+	// Developer-mode hiding is DISABLED on the per-app path on purpose. The swap
+	// makes sysctlbyname("security.mac.amfi.developer_mode_status") report 0 for
+	// EVERY process, and Dopamine itself is signed with get-task-allow: iOS then
+	// answered with "Developer Mode Required" the moment the app was opened while
+	// a hidden app was still alive, before any spawn hook could undo the swap.
+	// Its offsets are also hardcoded for one device/iOS pair, so on every other
+	// build it silently skipped anyway. (Manual "Hide Jailbreak" in the app UI
+	// still does its own swap.)
+	// app_hide_run_jbctl("devmode_oidswap", "on");
 
 	// Remove the /var/jb symlink last.
 	unlink("/var/jb");
@@ -386,7 +394,8 @@ static void app_hide_do_restore(void)
 	}
 
 	// Swap developer-mode reporting back (the real storage was never touched).
-	app_hide_run_jbctl("devmode_oidswap", "off");
+	// per-app path never touches dev-mode (see app_hide_do_hide)
+	// app_hide_run_jbctl("devmode_oidswap", "off");
 
 	// Restore the quarantined files, then remount fakelib.
 	app_hide_run_jbctl("audit", "restore");
@@ -424,7 +433,8 @@ bool app_hide_restore_after_userspace_reboot(void)
 
 	// A userspace reboot does not reset kernel memory, so a swap performed before
 	// the reboot is still in effect -> undo it here.
-	app_hide_run_jbctl("devmode_oidswap", "off");
+	// per-app path never touches dev-mode (see app_hide_do_hide)
+	// app_hide_run_jbctl("devmode_oidswap", "off");
 	app_hide_run_jbctl("audit", "restore");
 	return true;
 }
@@ -485,7 +495,8 @@ static bool app_hide_repair_half_hidden(void)
 	NSFileManager *fm = [NSFileManager defaultManager];
 	[fm removeItemAtPath:@"/var/jb" error:nil];
 	[fm createSymbolicLinkAtPath:@"/var/jb" withDestinationPath:jbRootStr error:nil];
-	app_hide_run_jbctl("devmode_oidswap", "off");
+	// per-app path never touches dev-mode (see app_hide_do_hide)
+	// app_hide_run_jbctl("devmode_oidswap", "off");
 	app_hide_run_jbctl("audit", "restore");
 	app_hide_run_jbctl("fakelib", "mount");
 	gHideInFlight = false;
