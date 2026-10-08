@@ -334,6 +334,11 @@ static bool gNoInjectActive = false;
 static int gNoInjectRefCount = 0;
 static pthread_mutex_t gNoInjectLock = PTHREAD_MUTEX_INITIALIZER;
 
+// Set while a global hide is in effect and cleared by the matching restore.
+// Lets the spawn hook detect a missed restore with a single flag read instead of
+// stat-ing /var/jb on every process launch.
+static bool gHideInFlight = false;
+
 // Pids of jailbreak apps running "resurrected" (restored while the jailbreak was
 // hidden). Killed before the jailbreak is re-hidden so they don't keep writing
 // into the real jbroot after /var/jb is removed.
@@ -377,6 +382,10 @@ static void app_hide_do_hide(void)
 
 	// Remove the /var/jb symlink last.
 	unlink("/var/jb");
+
+	// A hide is now in flight; the spawn hook / watchdog repair it if the
+	// matching restore is ever missed.
+	gHideInFlight = true;
 }
 
 static void app_hide_do_restore(void)
@@ -393,6 +402,8 @@ static void app_hide_do_restore(void)
 	// Restore the quarantined files, then remount fakelib.
 	app_hide_run_jbctl("audit", "restore");
 	app_hide_run_jbctl("fakelib", "mount");
+
+	gHideInFlight = false;
 }
 
 // Restore the jailbreak after a userspace reboot that happened while a no-inject
@@ -428,9 +439,56 @@ bool app_hide_restore_after_userspace_reboot(void)
 	return true;
 }
 
-// Self-heal watchdog (see app_hide.h). Runs every 10s in launchd and repairs a
-// "half hidden" device: /var/jb missing while nothing is actually hidden and no
-// manual hide is active.
+// Repair a "half hidden" device: /var/jb missing while nothing is actually
+// hidden and no manual hide is active. Returns true if it repaired something.
+static bool app_hide_repair_half_hidden(void)
+{
+	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+	if (!jbroot || !jbroot[0]) return false;
+
+	NSString *jbRootStr = [NSString stringWithUTF8String:jbroot];
+
+	// Jailbreak must be fully established, otherwise /var/jb is legitimately
+	// absent for a moment during bootstrap and we must not race it.
+	NSString *versionPath = [jbRootStr stringByAppendingPathComponent:@"basebin/.version"];
+	if (![[NSFileManager defaultManager] fileExistsAtPath:versionPath]) return false;
+
+	// Hidden on purpose (a no-inject app is running) -> leave it alone.
+	if (app_hide_is_currently_hidden()) return false;
+
+	// Manual "Hide Jailbreak" is on -> leave it alone.
+	NSString *safeModePath = [jbRootStr stringByAppendingPathComponent:@"basebin/.safe_mode"];
+	if ([[NSFileManager defaultManager] fileExistsAtPath:safeModePath]) return false;
+
+	// /var/jb present: nothing to fix.
+	if (access("/var/jb", F_OK) == 0) {
+		gHideInFlight = false;
+		return false;
+	}
+
+	app_hide_log(@"selfheal: /var/jb missing while not hidden -> relinking");
+	NSFileManager *fm = [NSFileManager defaultManager];
+	[fm removeItemAtPath:@"/var/jb" error:nil];
+	[fm createSymbolicLinkAtPath:@"/var/jb" withDestinationPath:jbRootStr error:nil];
+	app_hide_run_jbctl("devmode_oidswap", "off");
+	app_hide_run_jbctl("audit", "restore");
+	app_hide_run_jbctl("fakelib", "mount");
+	gHideInFlight = false;
+	return true;
+}
+
+// Very cheap fast path called from the launchd spawn hook on EVERY spawn: a
+// single bool read in the normal case. Only when a hide happened and its restore
+// was missed does it do any real work, repairing the device within one spawn.
+void app_hide_maybe_heal(void)
+{
+	if (!gHideInFlight) return;
+	app_hide_repair_half_hidden();
+}
+
+// Slow safety net (see app_hide.h): catches the case where launchd itself
+// restarted and lost gHideInFlight, so the spawn-hook fast path can no longer
+// tell that a hide is outstanding.
 void app_hide_start_selfheal(void)
 {
 	dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
@@ -439,33 +497,7 @@ void app_hide_start_selfheal(void)
 		dispatch_time(DISPATCH_TIME_NOW, 10ull * NSEC_PER_SEC),
 		10ull * NSEC_PER_SEC, 5ull * NSEC_PER_SEC);
 	dispatch_source_set_event_handler(timer, ^{
-		const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
-		if (!jbroot || !jbroot[0]) return;
-
-		// Jailbreak must be fully established, otherwise /var/jb is legitimately
-		// absent for a moment during bootstrap and we must not race it.
-		NSString *versionPath = [[NSString stringWithUTF8String:jbroot] stringByAppendingPathComponent:@"basebin/.version"];
-		if (![[NSFileManager defaultManager] fileExistsAtPath:versionPath]) return;
-
-		// A no-inject app is running: hidden on purpose, leave it alone.
-		if (app_hide_is_currently_hidden()) return;
-
-		// Manual "Hide Jailbreak" is on: hidden on purpose, leave it alone.
-		NSString *safeModePath = [[NSString stringWithUTF8String:jbroot] stringByAppendingPathComponent:@"basebin/.safe_mode"];
-		if ([[NSFileManager defaultManager] fileExistsAtPath:safeModePath]) return;
-
-		// /var/jb present: nothing to fix.
-		if (access("/var/jb", F_OK) == 0) return;
-
-		app_hide_log(@"selfheal: /var/jb missing while not hidden -> relinking");
-		NSFileManager *fm = [NSFileManager defaultManager];
-		[fm removeItemAtPath:@"/var/jb" error:nil];
-		[fm createSymbolicLinkAtPath:@"/var/jb"
-		         withDestinationPath:[NSString stringWithUTF8String:jbroot]
-		                       error:nil];
-		app_hide_run_jbctl("devmode_oidswap", "off");
-		app_hide_run_jbctl("audit", "restore");
-		app_hide_run_jbctl("fakelib", "mount");
+		app_hide_repair_half_hidden();
 	});
 	dispatch_resume(timer);
 }
