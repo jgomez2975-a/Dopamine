@@ -94,12 +94,46 @@
     NSString *jailbrokenVersion = [[DOEnvironmentManager sharedManager] jailbrokenVersion];
     NSString *launchedVersion = [self getLaunchedReleaseTag];
     
-    // ">" -> ">=": with the stock comparison, a self-built ipa that keeps the same
-    // version string as the already-installed basebin (3.0.10 == 3.0.10) can never
-    // surface the "Update Environment" button, so the bundled basebin.tar could
-    // never be staged and no basebin-side fix ever took effect. Allowing equality
-    // makes the button appear, which is what actually pushes the new basebin.
-    return [launchedVersion numericalVersionRepresentation] >= [jailbrokenVersion numericalVersionRepresentation];
+    if ([launchedVersion numericalVersionRepresentation] > [jailbrokenVersion numericalVersionRepresentation]) {
+        return YES;
+    }
+
+    // Self-built ipa: the app and the installed basebin carry the SAME version
+    // string (3.0.10 == 3.0.10), so the stock comparison above can never become
+    // true and the bundled basebin.tar could never be staged - every basebin-side
+    // fix stayed dead code. Fall back to fingerprinting the bundled basebin.tar
+    // and remembering which one was staged last, so the environment update fires
+    // exactly ONCE per distinct basebin build and then stays quiet.
+    NSString *token = [self bundledBasebinToken];
+    if (!token) return NO;
+    NSString *stagedToken = [_preferenceManager preferenceValueForKey:@"stagedBasebinToken"];
+    return ![token isEqualToString:stagedToken];
+}
+
+// FNV-1a over the bundled basebin.tar: identifies a basebin build without
+// depending on the (submodule-owned) version string.
+- (NSString *)bundledBasebinToken
+{
+    NSString *tarPath = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"basebin.tar"];
+    NSData *data = [NSData dataWithContentsOfFile:tarPath options:NSDataReadingMappedIfSafe error:nil];
+    if (!data || data.length == 0) return nil;
+
+    const uint8_t *bytes = data.bytes;
+    NSUInteger len = data.length;
+    uint64_t h = 1469598103934665603ULL;
+    for (NSUInteger i = 0; i < len; i++) {
+        h ^= bytes[i];
+        h *= 1099511628211ULL;
+    }
+    return [NSString stringWithFormat:@"%llu-%llx", (unsigned long long)len, (unsigned long long)h];
+}
+
+- (void)markEnvironmentUpdateStaged
+{
+    NSString *token = [self bundledBasebinToken];
+    if (token) {
+        [_preferenceManager setPreferenceValue:token forKey:@"stagedBasebinToken"];
+    }
 }
 
 - (bool)launchedReleaseNeedsManualUpdate
