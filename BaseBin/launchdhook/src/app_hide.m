@@ -439,6 +439,9 @@ bool app_hide_restore_after_userspace_reboot(void)
 	return true;
 }
 
+// Forward declaration: defined later in this file, but referenced above.
+bool app_hide_is_currently_hidden(void);
+
 // Repair a "half hidden" device: /var/jb missing while nothing is actually
 // hidden and no manual hide is active. Returns true if it repaired something.
 static bool app_hide_repair_half_hidden(void)
