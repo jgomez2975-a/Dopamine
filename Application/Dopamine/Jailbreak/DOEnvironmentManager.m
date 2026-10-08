@@ -906,6 +906,52 @@ extern char **environ;
     return result;
 }
 
+// Terminate every running process that belongs to this app bundle.
+//
+// The hide decision is made exactly once per process: spawn_hook.m writes
+// DOPAMINE_APP_HIDE into the child environment and hidejb_init() latches it for
+// that process lifetime - nothing re-reads the rules afterwards. Toggling the
+// switch only rewrites the plist, so an app that is still alive keeps its old
+// hidden/visible state forever: iOS resumes a backgrounded app WITHOUT spawning
+// it, so the rule is never evaluated again. That is why unchecking an app left it
+// still hidden. Killing it here makes the new rule apply on the next launch.
+- (void)terminateRunningAppWithBundleID:(NSString *)bundleID
+{
+    if (!bundleID) return;
+
+    Class proxyClass = objc_getClass("LSApplicationProxy");
+    if (!proxyClass) return;
+    id proxy = [proxyClass performSelector:NSSelectorFromString(@"applicationProxyForIdentifier:") withObject:bundleID];
+    if (!proxy) return;
+
+    NSURL *bundleURL = [proxy valueForKey:@"bundleURL"];
+    NSString *bundlePath = [bundleURL.path stringByStandardizingPath];
+    if (bundlePath.length == 0) return;
+
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            int count = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
+            if (count <= 0) return;
+            pid_t *pids = calloc((size_t)count, sizeof(pid_t));
+            if (!pids) return;
+            count = proc_listpids(PROC_ALL_PIDS, 0, pids, count * (int)sizeof(pid_t));
+            pid_t selfPid = getpid();
+            for (int i = 0; i < count; i++) {
+                pid_t pid = pids[i];
+                if (pid <= 0 || pid == selfPid) continue;
+                char exePath[PATH_MAX] = {0};
+                if (proc_pidpath(pid, exePath, sizeof(exePath)) <= 0) continue;
+                NSString *path = [NSString stringWithUTF8String:exePath];
+                if (path && [path hasPrefix:bundlePath]) {
+                    NSLog(@"[AppHide] terminating pid %d (%@) so the new rule applies", pid, path);
+                    kill(pid, SIGKILL);
+                }
+            }
+            free(pids);
+        }];
+    }];
+}
+
 
 #pragma mark - forkfix
 
