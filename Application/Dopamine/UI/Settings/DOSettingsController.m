@@ -1141,7 +1141,21 @@
     if (!LSApplicationWorkspace_class) return;
 
     NSObject *workspace = [LSApplicationWorkspace_class performSelector:NSSelectorFromString(@"defaultWorkspace")];
-    NSArray *allApps = [workspace performSelector:NSSelectorFromString(@"allApplications")];
+    if (!workspace) return;
+
+    // Fix "empty list" pit: a single enumeration selector returns nil on some
+    // iOS versions, which rendered the picker blank. Try the more reliable
+    // selectors in order and require a non-empty array before continuing.
+    NSArray *allApps = nil;
+    for (NSString *selName in @[@"allInstalledApplications", @"allApplications"]) {
+        SEL sel = NSSelectorFromString(selName);
+        if ([workspace respondsToSelector:sel]) {
+            allApps = [workspace performSelector:sel];
+            if ([allApps isKindOfClass:[NSArray class]] && allApps.count > 0) break;
+        }
+    }
+    if (![allApps isKindOfClass:[NSArray class]]) return;
+
     DOEnvironmentManager *env = [DOEnvironmentManager sharedManager];
 
     for (id app in allApps) {
