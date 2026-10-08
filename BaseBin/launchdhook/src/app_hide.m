@@ -369,6 +369,12 @@ static void app_hide_do_hide(void)
 	// files" under /var/mobile/Library). Pure file-rename, no uicache.
 	app_hide_run_jbctl("audit", "hide");
 
+	// Hide developer mode WITHOUT touching the real state (RootHide-style OID
+	// swap): a bare app querying security.mac.amfi.developer_mode_status then
+	// gets 0, while the real developer-mode storage stays untouched so the
+	// jailbreak and developer-signed apps keep working. Undone in do_restore.
+	app_hide_run_jbctl("devmode_oidswap", "on");
+
 	// Remove the /var/jb symlink last.
 	unlink("/var/jb");
 }
@@ -380,6 +386,9 @@ static void app_hide_do_restore(void)
 		unlink("/var/jb");
 		symlink(jbroot, "/var/jb");
 	}
+
+	// Swap developer-mode reporting back (the real storage was never touched).
+	app_hide_run_jbctl("devmode_oidswap", "off");
 
 	// Restore the quarantined files, then remount fakelib.
 	app_hide_run_jbctl("audit", "restore");
@@ -412,6 +421,9 @@ bool app_hide_restore_after_userspace_reboot(void)
 	[fm removeItemAtPath:@"/var/jb" error:nil];
 	[fm createSymbolicLinkAtPath:@"/var/jb" withDestinationPath:jbRootPath error:nil];
 
+	// A userspace reboot does not reset kernel memory, so a swap performed before
+	// the reboot is still in effect -> undo it here.
+	app_hide_run_jbctl("devmode_oidswap", "off");
 	app_hide_run_jbctl("audit", "restore");
 	return true;
 }
