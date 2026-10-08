@@ -96,6 +96,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)isEnvironmentNoInjectForBundleID:(NSString *)bundleID;
 - (BOOL)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID;
 - (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs;
+- (void)terminateRunningAppWithBundleID:(NSString *)bundleID;
 
 - (void)mountDictionary:(NSDictionary *)dictionary writeToFile:(NSString *)path;
 - (void)fakeMount:(NSString *)path unmount:(BOOL)unmount shouldDeleteMntFiles:(BOOL)shouldDeleteMntFiles;
