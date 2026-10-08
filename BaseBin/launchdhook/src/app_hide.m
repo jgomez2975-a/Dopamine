@@ -141,41 +141,6 @@ void app_hide_commit_pid(void *pidp)
 		pthread_rwlock_unlock(&gStateLock);
 		app_hide_log([NSString stringWithFormat:@"commit pid %d (version %d), blacklist size %lu", pid, pidversion, (unsigned long)gBlacklistedState.count]);
 
-		// Diagnostic: read POSIX signal dispositions (pbi_sigignore / pbi_sigcatch).
-		// These fields were removed from the iOS 26 SDK's struct proc_bsdinfo, but
-		// they still exist at fixed offsets 112 / 116 in the iOS 16 runtime struct
-		// (our actual device). Read them via a raw buffer + fixed offsets so the
-		// compiler never sees the removed field names.
-		unsigned char bsdinfoBuf[256] = {0};
-		if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, bsdinfoBuf, sizeof(bsdinfoBuf)) > 0) {
-			uint32_t sigignore = *(uint32_t *)(bsdinfoBuf + 112);
-			uint32_t sigcatch = *(uint32_t *)(bsdinfoBuf + 116);
-			app_hide_log([NSString stringWithFormat:@"  child %d sigignore=0x%x sigcatch=0x%x", pid, sigignore, sigcatch]);
-		}
-
-		// Diagnostic: dump the child's mach exception ports so we can see what a
-		// "signal handlers set" detector observes on a bare (no-inject) app.
-		mach_port_t task = MACH_PORT_NULL;
-		if (task_for_pid(mach_task_self(), pid, &task) != KERN_SUCCESS) {
-			app_hide_log([NSString stringWithFormat:@"  child %d task_for_pid failed", pid]);
-		} else {
-			exception_mask_t masks[EXC_TYPES_COUNT] = {0};
-			mach_port_t ports[EXC_TYPES_COUNT] = {0};
-			exception_behavior_t behaviors[EXC_TYPES_COUNT] = {0};
-			thread_state_flavor_t flavors[EXC_TYPES_COUNT] = {0};
-			mach_msg_type_number_t count = 0;
-			kern_return_t kr = task_get_exception_ports(task, EXC_MASK_ALL, masks, &count, ports, behaviors, flavors);
-			if (kr != KERN_SUCCESS) {
-				app_hide_log([NSString stringWithFormat:@"  child %d task_get_exception_ports kr=%d", pid, kr]);
-			} else if (count == 0) {
-				app_hide_log([NSString stringWithFormat:@"  child %d no exception ports (clean)", pid]);
-			} else {
-				for (mach_msg_type_number_t i = 0; i < count; i++) {
-					app_hide_log([NSString stringWithFormat:@"  child %d exc mask=0x%x port=0x%x", pid, masks[i], ports[i]]);
-				}
-			}
-			mach_port_deallocate(mach_task_self(), task);
-		}
 	}
 	free(pidp);
 }
