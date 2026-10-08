@@ -172,8 +172,17 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.1 * NSEC_PER_SEC), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
         if ([[DOUIManager sharedInstance] environmentUpdateAvailable])
         {
+            // Auto-stage the bundled basebin instead of making the user tap through
+            // the update screen twice. DOUIManager only reports an update while the
+            // bundled basebin.tar differs from the one staged last, so this fires
+            // once per build and then stops; updateEnvironment reboots userspace.
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self setupUpdateAvailable:YES];
+                NSError *error = [[DOEnvironmentManager sharedManager] updateEnvironment];
+                if (error) {
+                    // Staging failed: fall back to the manual button so the user can
+                    // retry rather than being stuck with no way to update.
+                    [self setupUpdateAvailable:YES];
+                }
             });
         }
         else if ([[DOUIManager sharedInstance] isUpdateAvailable])
