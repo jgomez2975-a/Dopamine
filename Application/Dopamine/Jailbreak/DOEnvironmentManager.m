@@ -1323,13 +1323,18 @@ extern char **environ;
                     [self setPrivatePrebootProtected:NO];
                     [self setFakelibMounted:NO];
 
-                    // RootHide-style: hide security.mac.amfi.developer_mode_status
-                    // (1 -> 0, i.e. report "developer mode disabled" like a stock
-                    // device). Runs in jbctl (root) because jbctl acquires the
-                    // kernel r/w primitives; the app itself has none after the
-                    // userspace reboot. Non-fatal: if krw/dev-mode storage is
-                    // unavailable it logs and continues.
-                    [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode", @"hide"]];
+                    // RootHide-style, NON-destructive: swap the oid_name pointers of
+                    // security.mac.amfi.developer_mode_status and
+                    // security.mac.amfi.launch_env_logging so the former *reports* 0
+                    // (like a stock device) while the real developer-mode storage is
+                    // left untouched. Must be the oidswap command, NOT "devmode
+                    // hide": the latter writes the developer_mode_enabled storage to
+                    // 0 for real, so a hide whose matching "show" never ran left the
+                    // device with developer mode actually disabled.
+                    // Runs in jbctl (root) because jbctl acquires the kernel r/w
+                    // primitives; the app itself has none after the userspace reboot.
+                    // Non-fatal: if krw/offsets are unavailable it logs and continues.
+                    [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode_oidswap", @"on"]];
                 }
 
                 [self hideJailbreakURLSchemes];
@@ -1367,10 +1372,11 @@ extern char **environ;
                     [self setPrivatePrebootProtected:YES];
                     [self refreshJailbreakApps];
 
-                    // Restore the real developer-mode state (1) that was hidden
-                    // above. Must run AFTER the /var/jb symlink is re-created,
+                    // Undo the oid swap performed when hiding: put both oid_name
+                    // pointers back so developer_mode_status reports the real value
+                    // again. Must run AFTER the /var/jb symlink is re-created,
                     // because jbctl lives at /var/jb/basebin/jbctl.
-                    [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode", @"show"]];
+                    [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode_oidswap", @"off"]];
                 }
             }
         }

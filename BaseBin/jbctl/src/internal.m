@@ -382,15 +382,17 @@ int jbctl_handle_internal(const char *command, int argc, char* argv[])
 		}
 		if (!validArg) return -1;
 
-		// jbctl runs as root but has no kernel r/w primitives yet; acquire them
-		// from launchdhook (same path idownloadd uses), then toggle the AMFI
-		// developer-mode flag. developer_mode_set_hidden() is non-fatal: if the
-		// storage cannot be located/written it returns -1 and we just report it.
+		// Kept as an alias of "devmode_oidswap" for backwards compatibility.
+		// It deliberately no longer calls developer_mode_set_hidden(): that wrote
+		// the developer_mode_enabled storage to 0 for real, so any hide whose
+		// matching "show" never ran left the device with developer mode actually
+		// disabled. The oid swap only changes what the sysctl *reports*.
 		if (jbclient_initialize_primitives() != 0) {
 			printf("ERROR: failed to initialize krw primitives\n");
 			return -1;
 		}
-		return developer_mode_set_hidden(toHide);
+		oidswap_log("devmode: alias -> oidswap hide=%d\n", toHide);
+		return devmode_oidswap(toHide);
 	}
 	else if (!strcmp(command, "urlschemes")) {
 		if (argc > 1) {
