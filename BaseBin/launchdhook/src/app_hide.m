@@ -26,6 +26,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <stdlib.h>
+#include <time.h>
 #include <sys/mount.h>
 
 #include <libjailbreak/libjailbreak.h>
@@ -194,6 +195,24 @@ bool app_hide_is_blacklisted_pid(pid_t pid)
 	return blacklisted;
 }
 
+// How many tracked no-inject pids are still alive (pid still has the same
+// pidversion we recorded). Used to tell a real hide apart from a stale one.
+static int app_hide_live_blacklisted_count(void)
+{
+	state_init();
+	int live = 0;
+	pthread_rwlock_rdlock(&gStateLock);
+	for (NSNumber *pidNum in gBlacklistedState) {
+		pid_t pid = (pid_t)pidNum.intValue;
+		NSNumber *cachedVersion = gBlacklistedState[pidNum];
+		if (cachedVersion.intValue == proc_get_pidversion(pid)) {
+			live++;
+		}
+	}
+	pthread_rwlock_unlock(&gStateLock);
+	return live;
+}
+
 static void app_hide_remove_pid(pid_t pid)
 {
 	if (pid <= 0) return;
@@ -338,6 +357,10 @@ static pthread_mutex_t gNoInjectLock = PTHREAD_MUTEX_INITIALIZER;
 // Lets the spawn hook detect a missed restore with a single flag read instead of
 // stat-ing /var/jb on every process launch.
 static bool gHideInFlight = false;
+// When the current hide started. Guards the stale-hide check below against the
+// short window where the flag is already set but the child pid has not been
+// tracked yet.
+static time_t gHideStartedAt = 0;
 
 // Pids of jailbreak apps running "resurrected" (restored while the jailbreak was
 // hidden). Killed before the jailbreak is re-hidden so they don't keep writing
@@ -386,6 +409,7 @@ static void app_hide_do_hide(void)
 	// A hide is now in flight; the spawn hook / watchdog repair it if the
 	// matching restore is ever missed.
 	gHideInFlight = true;
+	gHideStartedAt = time(NULL);
 }
 
 static void app_hide_do_restore(void)
@@ -404,6 +428,7 @@ static void app_hide_do_restore(void)
 	app_hide_run_jbctl("fakelib", "mount");
 
 	gHideInFlight = false;
+	gHideStartedAt = 0;
 }
 
 // Restore the jailbreak after a userspace reboot that happened while a no-inject
@@ -456,16 +481,38 @@ static bool app_hide_repair_half_hidden(void)
 	NSString *versionPath = [jbRootStr stringByAppendingPathComponent:@"basebin/.version"];
 	if (![[NSFileManager defaultManager] fileExistsAtPath:versionPath]) return false;
 
-	// Hidden on purpose (a no-inject app is running) -> leave it alone.
-	if (app_hide_is_currently_hidden()) return false;
-
 	// Manual "Hide Jailbreak" is on -> leave it alone.
 	NSString *safeModePath = [jbRootStr stringByAppendingPathComponent:@"basebin/.safe_mode"];
 	if ([[NSFileManager defaultManager] fileExistsAtPath:safeModePath]) return false;
 
+	// Stale-hide detection -- the fix for "I have to tap Hide Jailbreak every so
+	// often". app_hide_is_currently_hidden() is pure bookkeeping: when a
+	// no-inject app dies without its watch_exit firing (killed while launchd was
+	// busy, pidversion churn) the flag stays set forever, and every repair path
+	// used to bail out on it -- leaving the device hidden with no way back except
+	// the manual toggle. If the flag is set but not one tracked no-inject app is
+	// still alive, the hide is stale: clear it and carry on to the repair below.
+	if (app_hide_is_currently_hidden()) {
+		bool stale = (gHideStartedAt != 0) &&
+		             (time(NULL) - gHideStartedAt >= 15) &&
+		             (app_hide_live_blacklisted_count() == 0);
+		if (!stale) {
+			// Hidden on purpose (a tracked no-inject app is alive, or the hide
+			// has only just started).
+			return false;
+		}
+		app_hide_log(@"selfheal: hide flagged but no tracked no-inject app alive -> stale hide, clearing");
+		pthread_mutex_lock(&gNoInjectLock);
+		gNoInjectRefCount = 0;
+		gNoInjectActive = false;
+		pthread_mutex_unlock(&gNoInjectLock);
+		gHideStartedAt = 0;
+	}
+
 	// /var/jb present: nothing to fix.
 	if (access("/var/jb", F_OK) == 0) {
 		gHideInFlight = false;
+		gHideStartedAt = 0;
 		return false;
 	}
 
@@ -477,6 +524,7 @@ static bool app_hide_repair_half_hidden(void)
 	app_hide_run_jbctl("audit", "restore");
 	app_hide_run_jbctl("fakelib", "mount");
 	gHideInFlight = false;
+	gHideStartedAt = 0;
 	return true;
 }
 
