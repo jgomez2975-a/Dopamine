@@ -242,6 +242,11 @@
 // and Settings is an un-injected process - the state the Hide Jailbreak switch used to
 // be the only way out of. So probe for it, and repair only when the probe says so.
 // The alert reports what was found: it only appears when something really was broken.
+// The failure this repairs is produced by a userspace reboot, and the state it leaves
+// behind cannot be detected from inside the app: measured while the device was broken,
+// LaunchServices still listed Sileo (LS proxy: YES), no .safe_mode was left behind,
+// nothing was quarantined, and /var/jb was present. Every probe read clean. So stop
+// probing and identify the boot session instead: run the repair once after each one.
 - (void)repairVisibilityAfterEnvironmentUpdateIfNeeded
 {
     DOEnvironmentManager *environmentManager = [DOEnvironmentManager sharedManager];
@@ -253,43 +258,32 @@
     didRunThisLaunch = YES;
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
-        NSString *flagPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/pending_visibility_repair"];
-        NSFileManager *fm = [NSFileManager defaultManager];
-        BOOL afterUpdate = [fm fileExistsAtPath:flagPath];
-        if (afterUpdate) [fm removeItemAtPath:flagPath error:nil];
+        // systemUptime gives the current boot session even though this process was
+        // started long after it, so one stamp per boot is enough to run exactly once.
+        NSDate *bootDate = [NSDate dateWithTimeIntervalSinceNow:-[[NSProcessInfo processInfo] systemUptime]];
+        NSString *bootStamp = [NSString stringWithFormat:@"%.0f", [bootDate timeIntervalSince1970]];
+        NSString *stampPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/last_repaired_boot"];
+        NSString *lastStamp = [NSString stringWithContentsOfFile:stampPath encoding:NSUTF8StringEncoding error:nil];
+        if ([bootStamp isEqualToString:lastStamp]) return;
+        [bootStamp writeToFile:stampPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
-        BOOL unregistered = [environmentManager jailbreakAppsUnregistered];
-        BOOL straySafeMode = [environmentManager hasStraySafeMode];
-
-        if (!unregistered && !straySafeMode && !afterUpdate) return;
-
-        // Lighter repairs were all tried on this device and all left the store gone:
-        // re-registering the bundles, clearing safe mode, and finally an exact mirror
-        // of setJailbreakHidden:NO including the devmode oidswap. The one thing that
-        // has never failed is the manual route, which is hide followed immediately by
-        // unhide - so drive the same two calls the switch drives, in the same order,
-        // on the same queue. The hide half is what the mirror was missing.
+        // Re-run the manual route verbatim: hide, then unhide. Every attempt that only
+        // reproduced the unhide half failed, because that half is a no-op unless the
+        // hide half ran first - the hide is what unregisters the bundles (so the
+        // following uicache -a has to rebuild the icon cache for real) and what unmounts
+        // the fakelib overlay that the unhide then re-mounts.
         [environmentManager setJailbreakHidden:YES];
         [environmentManager setJailbreakHidden:NO];
 
-        NSString *report = [NSString stringWithFormat:
-            @"store apps unregistered: %@\nstray safe_mode: %@\nafter basebin update: %@\nrepair: done (incl. devmode_oidswap off)\n\n--- raw state ---\n%@",
-            unregistered ? @"YES" : @"no",
-            straySafeMode ? @"YES" : @"no",
-            afterUpdate ? @"YES" : @"no",
-            [environmentManager jailbreakVisibilityDiagnostics]];
-
         dispatch_async(dispatch_get_main_queue(), ^{
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Visibility repair"
-                                                                          message:report
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Jailbreak visibility"
+                                                                          message:@"鑷姩鎵ц浜嗐€岄殣钘忚秺鐙?鈫?鍙栨秷闅愯棌銆嶏紝瓒婄嫳鍟嗗簵涓庢彃浠堕〉宸查噸寤恒€?
                                                                    preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:alert animated:YES completion:nil];
         });
     });
 }
-
-
 - (void)startJailbreak
 {
     DOJailbreaker *jailbreaker = [[DOJailbreaker alloc] init];
