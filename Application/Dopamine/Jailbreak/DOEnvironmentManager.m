@@ -530,32 +530,59 @@ extern char **environ;
 - (void)repairJailbreakVisibility
 {
     void (^repair)(void) = ^{
-        jbclient_platform_set_systemwide_domain_enabled(true);
-        jbclient_platform_set_crashreporter_enabled(true);
-        [[NSFileManager defaultManager] removeItemAtPath:@"/var/mobile/.DopamineCrashReporterDisabled" error:nil];
+        NSFileManager *fm = [NSFileManager defaultManager];
 
-        if (![[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"]) {
-            [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb"
-                                                 withDestinationPath:JBROOT_PATH(@"/")
-                                                               error:nil];
+        if ([self isJailbroken]) {
+            jbclient_platform_set_systemwide_domain_enabled(true);
+            jbclient_platform_set_crashreporter_enabled(true);
+            [fm removeItemAtPath:@"/var/mobile/.DopamineCrashReporterDisabled" error:nil];
         }
 
-        [self setForkfixEnabled:YES];
-        [self setFakelibMounted:YES];
-        [self setPrivatePrebootProtected:YES];
         [self restoreHiddenItems];
-        [self refreshJailbreakApps];
+        [self restoreJailbreakURLSchemes];
 
-        // Settings.app may have been running while the jailbreak was hidden, in which
-        // case it has no tweak loader and keeps showing an empty Settings until it is
-        // relaunched.
-        [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
+        [fm createSymbolicLinkAtPath:@"/var/jb"
+                 withDestinationPath:JBROOT_PATH(@"/")
+                               error:nil];
+
+        if ([self isJailbroken]) {
+            [fm removeItemAtPath:JBROOT_PATH(@"/basebin/.safe_mode") error:nil];
+            [fm removeItemAtPath:JBROOT_PATH(@"/basebin/.safe_mode_user") error:nil];
+            [fm removeItemAtPath:JBROOT_PATH(@"/basebin/.safe_mode_auto") error:nil];
+            [fm removeItemAtPath:JBROOT_PATH(@"/basebin/.safe_mode_inject_off") error:nil];
+
+            [self setForkfixEnabled:YES];
+            [self setFakelibMounted:YES];
+            [self setPrivatePrebootProtected:YES];
+            [self refreshJailbreakApps];
+
+            // The step this repair was missing, and the reason it reported success
+            // while nothing came back. Hiding the jailbreak swaps the oid_name
+            // pointers so security.mac.amfi.developer_mode_status reports 0; a device
+            // in that state refuses to launch ad-hoc signed binaries, which is exactly
+            // Sileo and every tweak's preference bundle. So the store stayed
+            // unlaunchable and the tweak pages stayed empty even though the
+            // LaunchServices registrations were intact and nothing was quarantined -
+            // which is why both probes read "no" and this repair still changed nothing.
+            // It is also the only reason cycling the Hide Jailbreak switch ever fixed
+            // the device: its restore branch runs precisely this command. Must run with
+            // /var/jb back in place, because jbctl lives at /var/jb/basebin/jbctl.
+            [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode_oidswap", @"off"]];
+
+            // Settings.app is normally still the process that ran while the jailbreak
+            // was hidden; a process spawned without systemhook injection never gains it
+            // later, so it keeps showing an empty Settings until relaunched.
+            [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
+        }
     };
 
     if ([self isJailbroken]) {
         [self runAsRoot:^{
             [self runUnsandboxed:repair];
         }];
+    }
+    else {
+        repair();
     }
 }
 - (void)unregisterJailbreakApps
