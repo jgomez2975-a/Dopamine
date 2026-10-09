@@ -578,28 +578,21 @@ extern char **environ;
 static BOOL gSuppressDevmodeOidSwap = NO;
 - (void)repairJailbreakVisibility
 {
-    if (![self isJailbroken]) return;
+    // Deliberate hide: leave it alone. Dopamine's Hide Jailbreak switch writes
+    // .safe_mode_user, and the broken state this repair undoes never has it, so the
+    // marker is what tells a real hide request apart from a stuck one.
+    if ([[NSFileManager defaultManager] fileExistsAtPath:JBROOT_PATH(@"/basebin/.safe_mode_user")]) return;
 
-    // The store icon going missing is a SpringBoard icon cache problem, not a registration
-    // problem: while the icon was gone, LSApplicationProxy still resolved Sileo the whole
-    // time. Rebuilding it by unregistering the bundles worked, but uicache -u followed by
-    // uicache -a makes iOS treat those apps as freshly installed, so their privacy grants
-    // were discarded and Sileo asked for network access again after every reboot. Dropping
-    // the cache and letting uicache rebuild from the still-intact registration restores the
-    // icon without touching the app identities, so nothing else is reset.
-    [self runAsRoot:^{
-        [self runUnsandboxed:^{
-            NSFileManager *fm = [NSFileManager defaultManager];
-            [fm removeItemAtPath:@"/var/mobile/Library/Caches/com.apple.IconsCache" error:nil];
-            [fm removeItemAtPath:@"/var/mobile/Library/Caches/com.apple.IconsCache.plist" error:nil];
-
-            [self refreshJailbreakApps];
-
-            // Settings is cleared once so it cannot be the process that survives across the
-            // rebuild holding an un-injected state.
-            [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
-        }];
-    }];
+    // The only repair that has ever brought back both the store icon and the Settings
+    // tweak panes is the one performed by hand: hide the jailbreak, then unhide it.
+    // Neither half works alone. The hide is what unregisters the jailbreak bundles, so
+    // the unhide's uicache -a is forced to rebuild the icon cache for real instead of
+    // concluding it already matches, and it is what unmounts the fakelib overlay that the
+    // unhide then re-mounts. Repairs that reproduced only the unhide half left the store
+    // missing every time, which is why the Hide Jailbreak switch had to be cycled by hand.
+    [self setJailbreakHidden:YES];
+    [NSThread sleepForTimeInterval:8.0];
+    [self setJailbreakHidden:NO];
 }
 - (void)unregisterJailbreakApps
 {
