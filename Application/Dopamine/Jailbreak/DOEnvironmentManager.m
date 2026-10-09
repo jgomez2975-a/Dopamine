@@ -571,93 +571,26 @@ extern char **environ;
 // the store and every tweak pane stayed missing until the Hide Jailbreak switch was
 // cycled by hand, whose unhide path does exactly this. Run the same recovery once,
 // on the first launch after the update that needed it.
+// Set only while the automated repair drives the switch, so that its "hide" half skips
+// devmode_oidswap on. The swap exists to hide the device from banking apps and does
+// nothing for rebuilding an icon cache or remounting the fakelib, while leaving developer
+// mode reading 0 is what makes a developer-mode alert appear when this app is launched.
+static BOOL gSuppressDevmodeOidSwap = NO;
 - (void)repairJailbreakVisibility
 {
-    void (^repair)(void) = ^{
-        NSFileManager *fm = [NSFileManager defaultManager];
+    // The hand-written replay of the switch is gone. Reimplementing the hide half step by
+    // step left the device in a state that rebooted the moment this app was opened again,
+    // because those steps have to run through setJailbreakHidden: to keep their ordering
+    // and their guards. Driving the real calls is both proven and safe.
+    gSuppressDevmodeOidSwap = YES;
+    [self setJailbreakHidden:YES];
+    gSuppressDevmodeOidSwap = NO;
+    [self setJailbreakHidden:NO];
 
-        // ---- hide half, with two deliberate omissions from the real switch ----
-        // 1. devmode_oidswap is left out. It is not needed to rebuild an icon cache or
-        //    to re-mount the fakelib, and turning it on makes iOS report developer mode
-        //    as disabled, which is what surfaces the developer-mode alert on the next
-        //    launch of this app. The command is still issued below, but only as "off".
-        // 2. The .safe_mode markers are left out too: their only effect is to make the
-        //    basebin skip tweak injection, which nothing here depends on, and a marker
-        //    that survived a crash would leave the whole jailbreak un-injected.
-        if ([self isJailbroken]) {
-            [self setForkfixEnabled:NO];
-            [self setPrivatePrebootProtected:NO];
-
-            // This is the step every earlier repair was missing. uicache -a on its own
-            // decides the cache is already consistent and does nothing, so the store icon
-            // never came back; the switch only ever fixed it by unregistering the bundles
-            // first, which forces the following uicache -a to rebuild for real.
-            [self unregisterJailbreakApps];
-
-            // Unmounting the fakelib overlay is what makes the remount below effective.
-            [self setFakelibMounted:NO];
-        }
-        else {
-            [self setForkfixEnabled:NO];
-            [self setPrivatePrebootProtected:NO];
-            [self setFakelibMounted:NO];
-        }
-
-        [self hideJailbreakURLSchemes];
-        [fm removeItemAtPath:@"/var/jb" error:nil];
-        [self runJailbreakLibraryAudit];
-
-        if ([self isJailbroken]) {
-            jbclient_platform_set_systemwide_domain_enabled(false);
-            jbclient_platform_set_crashreporter_enabled(false);
-        }
-
-        // ---- unhide half ----
-        if ([self isJailbroken]) {
-            jbclient_platform_set_systemwide_domain_enabled(true);
-            jbclient_platform_set_crashreporter_enabled(true);
-            [fm removeItemAtPath:@"/var/mobile/.DopamineCrashReporterDisabled" error:nil];
-        }
-
-        [self restoreHiddenItems];
-        [self restoreJailbreakURLSchemes];
-
-        [fm createSymbolicLinkAtPath:@"/var/jb"
-                 withDestinationPath:JBROOT_PATH(@"/")
-                               error:nil];
-
-        if ([self isJailbroken]) {
-            [fm removeItemAtPath:JBROOT_PATH(@"/basebin/.safe_mode") error:nil];
-            [fm removeItemAtPath:JBROOT_PATH(@"/basebin/.safe_mode_user") error:nil];
-            [fm removeItemAtPath:JBROOT_PATH(@"/basebin/.safe_mode_auto") error:nil];
-            [fm removeItemAtPath:JBROOT_PATH(@"/basebin/.safe_mode_inject_off") error:nil];
-
-            [self setForkfixEnabled:YES];
-            [self setFakelibMounted:YES];
-            [self setPrivatePrebootProtected:YES];
-            [self refreshJailbreakApps];
-
-            // Only ever "off". This also clears the swapped state a previous build left
-            // behind, which is what makes the developer-mode alert appear.
-            [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode_oidswap", @"off"]];
-
-            [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
-        }
-    };
-
-    if ([self isJailbroken]) {
-        [self runAsRoot:^{
-            [self runUnsandboxed:repair];
-        }];
-    }
-    else {
-        repair();
-    }
-
-    // Settings.app starts the instant the user taps it, and a process that starts before
-    // the fakelib overlay is back never gains tweak injection afterwards - which is why
-    // the store returned while the tweak pages stayed empty. Keep clearing the app for a
-    // while so any instance that starts during the rebuild is discarded.
+    // Settings.app starts the instant it is tapped, and a process that starts before the
+    // fakelib overlay is back never gains tweak injection afterwards - which is why the
+    // store returned while the tweak pages stayed empty. Keep clearing the app for a while
+    // so any instance that starts during the rebuild is thrown away.
     for (NSNumber *delay in @[@5, @15, @30, @45]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)),
                        dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -1590,7 +1523,9 @@ extern char **environ;
                     // Runs in jbctl (root) because jbctl acquires the kernel r/w
                     // primitives; the app itself has none after the userspace reboot.
                     // Non-fatal: if krw/offsets are unavailable it logs and continues.
-                    [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode_oidswap", @"on"]];
+                    if (!gSuppressDevmodeOidSwap) {
+                [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode_oidswap", @"on"]];
+            }
                 }
 
                 [self hideJailbreakURLSchemes];
