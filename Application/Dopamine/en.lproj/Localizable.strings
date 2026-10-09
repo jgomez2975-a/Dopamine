@@ -167,3 +167,9 @@
 
 "Button_Environment_Diagnostics" = "Export environment diagnostics (read-only)";
 "Environment_Diagnostics_Consent" = "Reads jailbreak paths, mounts, file metadata and filtered hiding logs. Does not reboot, refresh apps, move files or modify hiding rules. Writes only a report in this app’s temporary directory for optional sharing. The report may include device paths, timestamps and relevant app identifiers; no passwords or account credentials are read.";
+
+"Button_JB_Entry_Recovery" = "Repair jailbreak entry (keep backup)";
+"JB_Entry_Recovery_Consent" = "First fully close all no-injection apps. Only repairs a plain directory occupying /var/jb. Validates the live root and required files, then atomically swaps in a correct symlink, preserving the original directory in a sibling DopamineBackup path. Does not delete that directory, refresh apps, reboot or change hide rules. Stops if checks fail.";
+"JB_Entry_Recovery_Verified" = "Jailbreak entry verified";
+"JB_Entry_Recovery_Stopped" = "Entry recovery stopped";
+"JB_Entry_Recovery_Result_Body" = "Take a screenshot and export diagnostics again. Apps have not been refreshed and no reboot was performed. Do not test hidden apps or delete the backup yet.";

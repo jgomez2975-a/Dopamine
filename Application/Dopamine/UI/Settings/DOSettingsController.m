@@ -22,10 +22,13 @@
 #import "DOPSJetsamListItemsController.h"
 #import "DOButtonCell.h"
 #import "DOReadOnlyDiagnostics.h"
+#import "DOJBEntryRecovery.h"
 
 @interface DOSettingsController ()
 - (void)exportEnvironmentDiagnosticsPressed;
 - (void)collectAndShareEnvironmentDiagnostics;
+- (void)repairJBEntryPressed;
+- (void)performJBEntryRecovery;
 
 @end
 
@@ -330,6 +333,14 @@
                 [diagnosticSpecifier setProperty:@"doc.text.magnifyingglass" forKey:@"image"];
                 [diagnosticSpecifier setProperty:@"exportEnvironmentDiagnosticsPressed" forKey:@"action"];
                 [specifiers addObject:diagnosticSpecifier];
+
+                PSSpecifier *recoverySpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                [recoverySpecifier setProperty:@"Button_JB_Entry_Recovery" forKey:@"title"];
+                [recoverySpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                [recoverySpecifier setProperty:buttonHeight forKey:@"height"];
+                [recoverySpecifier setProperty:@"link.badge.plus" forKey:@"image"];
+                [recoverySpecifier setProperty:@"repairJBEntryPressed" forKey:@"action"];
+                [specifiers addObject:recoverySpecifier];
 
                 if (envManager.isJailbroken) {
                     PSSpecifier *refreshAppsSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
@@ -776,6 +787,45 @@
 
 #pragma mark - Button Actions
 
+- (void)repairJBEntryPressed
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Button_JB_Entry_Recovery")
+        message:DOLocalizedString(@"JB_Entry_Recovery_Consent") preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Continue") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [self performJBEntryRecovery];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)performJBEntryRecovery
+{
+    DOEnvironmentManager *env = [DOEnvironmentManager sharedManager];
+    __block NSDictionary *result = DOJBResult(NO, @"root_access_unavailable", EACCES, nil);
+    @synchronized (env) {
+        if (env.isJailbroken && env.isBootstrapped) {
+            NSString *root = JBROOT_PATH(@"/");
+            [env runAsRoot:^{ [env runUnsandboxed:^{
+                NSString *canonical = DOJBRealPath(root);
+                if (geteuid() != 0) result = DOJBResult(NO, @"root_access_unavailable", EACCES, nil);
+                else if (![canonical hasPrefix:@"/private/preboot/"] || ![canonical.lastPathComponent isEqual:@"procursus"])
+                    result = DOJBResult(NO, @"unexpected_root_no_change", EINVAL, nil);
+                else result = DOJBRecoverEntry(@"/var/jb", canonical);
+            }]; }];
+        }
+    }
+    // App-private operation record, subsequently included in the shared report.
+    NSURL *record = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"Dopamine-JBEntryRecovery.json"]];
+    NSData *json = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:NULL];
+    [json writeToURL:record options:NSDataWritingAtomic error:NULL];
+    NSString *title = DOLocalizedString([result[@"success"] boolValue] ? @"JB_Entry_Recovery_Verified" : @"JB_Entry_Recovery_Stopped");
+    NSString *message = [NSString stringWithFormat:@"%@\n\n%@\nerrno=%@\nbackup=%@", DOLocalizedString(@"JB_Entry_Recovery_Result_Body"),
+        result[@"stage"], result[@"errno"], result[@"backup"]];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Close") style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)exportEnvironmentDiagnosticsPressed
 {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Button_Environment_Diagnostics")
@@ -800,6 +850,11 @@
     if (!snapshot) collect(); // Read-only fallback reports access errors explicitly.
     NSMutableDictionary *report = [snapshot mutableCopy];
     report[@"diagnostic_schema"] = @1;
+    NSData *recoveryData = [NSData dataWithContentsOfFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"Dopamine-JBEntryRecovery.json"]];
+    if (recoveryData) {
+        id recovery = [NSJSONSerialization JSONObjectWithData:recoveryData options:0 error:NULL];
+        if ([recovery isKindOfClass:NSDictionary.class]) report[@"last_entry_recovery"] = recovery;
+    }
     report[@"date"] = [[NSDate date] description];
     report[@"app_version"] = env.appVersion ?: @"?";
     report[@"app_commit"] = env.nightlyHash ?: @"?";

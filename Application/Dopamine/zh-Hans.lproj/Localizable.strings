@@ -163,3 +163,9 @@
 
 "Button_Environment_Diagnostics" = "导出环境诊断（只读）";
 "Environment_Diagnostics_Consent" = "只读取越狱路径、挂载、文件状态和筛选后的隐藏日志；不重启、不刷新应用、不移动文件、不修改隐藏规则。仅在本 App 临时目录生成报告，由你选择是否分享。报告可能包含设备路径、时间和相关 App 标识，不读取密码或账户凭据。";
+
+"Button_JB_Entry_Recovery" = "恢复越狱入口（保留备份）";
+"JB_Entry_Recovery_Consent" = "请先彻底退出所有开启无注入的 App。仅修复 /var/jb 被普通目录占用的情况：核对真实根目录和关键文件后，原子交换为正确链接，原目录完整保存在同级 DopamineBackup 目录。不会删除原目录，不会刷新应用、重启或改变隐藏规则。检查不通过就停止。";
+"JB_Entry_Recovery_Verified" = "越狱入口已验证";
+"JB_Entry_Recovery_Stopped" = "入口恢复已停止";
+"JB_Entry_Recovery_Result_Body" = "请截图并重新导出诊断报告。尚未刷新应用或重启；先不要测试隐藏 App，也不要删除备份。";
