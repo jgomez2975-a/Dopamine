@@ -167,6 +167,15 @@ __attribute__((constructor)) static void initializer(void)
 	initJetsamHook();
 	app_hide_init();
 	app_hide_start_selfheal();
+	// Rebuild the LaunchServices registrations for the jailbreak apps on every
+	// boot, not only when the jailbreak was hidden. Applying a new basebin
+	// replaces /var/jb/basebin and reboots the userspace; the bundles under
+	// /var/jb/Applications keep their files but lose their registrations, so Sileo
+	// and every tweak pane disappeared from the home screen until the user cycled
+	// the Hide Jailbreak switch by hand. This used to live only inside the
+	// DOPAMINE_IS_HIDDEN branch below, which never runs for a basebin update
+	// (the jailbreak is visible at that point), so it never actually fired.
+	app_hide_schedule_uicache();
 
 	sysctlbyname_orig = sysctlbyname;
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)sysctlbyname, (void *)sysctlbyname_hook, NULL);
