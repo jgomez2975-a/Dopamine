@@ -268,14 +268,26 @@
         // useless here: a userspace reboot restarts launchd but not the kernel, so the
         // uptime never changes and the repair ran exactly once and never again - which is
         // why the store icon came back the first time and then stayed gone.
-        NSString *bootToken = [NSString stringWithContentsOfFile:@"/var/mobile/.DopamineBootToken"
-                                                        encoding:NSUTF8StringEncoding
-                                                           error:nil];
-        if (bootToken.length == 0) return;
-        NSString *stampPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/last_repaired_boot"];
-        NSString *lastStamp = [NSString stringWithContentsOfFile:stampPath encoding:NSUTF8StringEncoding error:nil];
-        if ([bootToken isEqualToString:lastStamp]) return;
-        [bootToken writeToFile:stampPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        // A hidden jailbreak bypasses the boot-session gate entirely. It is either a
+        // deliberate hide - the repair checks for that marker itself and returns without
+        // touching anything - or the stuck state that removes the store icon and every
+        // tweak pane from Settings. That stuck state is also what makes this gate wrong:
+        // it does not need a userspace reboot to appear (a per-app hide whose restore was
+        // missed produces it), and the basebin update that would have caused a reboot is
+        // correctly skipped when the bundled basebin did not change, because
+        // environmentUpdateAvailable compares a fingerprint of basebin.tar. Gating on the
+        // boot token therefore meant the repair never ran in exactly the case it exists
+        // for, which is why the Hide Jailbreak switch still had to be cycled by hand.
+        if (![environmentManager isJailbreakHidden]) {
+            NSString *bootToken = [NSString stringWithContentsOfFile:@"/var/mobile/.DopamineBootToken"
+                                                            encoding:NSUTF8StringEncoding
+                                                               error:nil];
+            if (bootToken.length == 0) return;
+            NSString *stampPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/last_repaired_boot"];
+            NSString *lastStamp = [NSString stringWithContentsOfFile:stampPath encoding:NSUTF8StringEncoding error:nil];
+            if ([bootToken isEqualToString:lastStamp]) return;
+            [bootToken writeToFile:stampPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        }
 
         // Re-run the manual route verbatim: hide, then unhide. Every attempt that only
         // reproduced the unhide half failed, because that half is a no-op unless the
