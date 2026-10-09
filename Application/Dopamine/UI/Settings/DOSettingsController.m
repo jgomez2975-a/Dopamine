@@ -21,8 +21,11 @@
 #import "DOSceneDelegate.h"
 #import "DOPSJetsamListItemsController.h"
 #import "DOButtonCell.h"
+#import "DOReadOnlyDiagnostics.h"
 
 @interface DOSettingsController ()
+- (void)exportEnvironmentDiagnosticsPressed;
+- (void)collectAndShareEnvironmentDiagnostics;
 
 @end
 
@@ -319,6 +322,14 @@
                 PSSpecifier *actionsGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
                 actionsGroupSpecifier.name = DOLocalizedString(@"Section_Actions");
                 [specifiers addObject:actionsGroupSpecifier];
+
+                PSSpecifier *diagnosticSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                [diagnosticSpecifier setProperty:@"Button_Environment_Diagnostics" forKey:@"title"];
+                [diagnosticSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                [diagnosticSpecifier setProperty:buttonHeight forKey:@"height"];
+                [diagnosticSpecifier setProperty:@"doc.text.magnifyingglass" forKey:@"image"];
+                [diagnosticSpecifier setProperty:@"exportEnvironmentDiagnosticsPressed" forKey:@"action"];
+                [specifiers addObject:diagnosticSpecifier];
 
                 if (envManager.isJailbroken) {
                     PSSpecifier *refreshAppsSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
@@ -764,6 +775,53 @@
 }
 
 #pragma mark - Button Actions
+
+- (void)exportEnvironmentDiagnosticsPressed
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Button_Environment_Diagnostics")
+        message:DOLocalizedString(@"Environment_Diagnostics_Consent") preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Continue") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [self collectAndShareEnvironmentDiagnostics];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)collectAndShareEnvironmentDiagnostics
+{
+    DOEnvironmentManager *env = [DOEnvironmentManager sharedManager];
+    NSString *root = env.isBootstrapped ? JBROOT_PATH(@"/") : nil;
+    __block NSDictionary *snapshot = nil;
+    void (^collect)(void) = ^{ snapshot = DOCollectEnvironmentDiagnostics(root); };
+    if (env.isJailbroken || geteuid() == 0) {
+        [env runAsRoot:^{ [env runUnsandboxed:collect]; }];
+    }
+    BOOL privilegedScopeEntered = snapshot != nil;
+    if (!snapshot) collect(); // Read-only fallback reports access errors explicitly.
+    NSMutableDictionary *report = [snapshot mutableCopy];
+    report[@"diagnostic_schema"] = @1;
+    report[@"date"] = [[NSDate date] description];
+    report[@"app_version"] = env.appVersion ?: @"?";
+    report[@"app_commit"] = env.nightlyHash ?: @"?";
+    report[@"iOS"] = UIDevice.currentDevice.systemVersion;
+    report[@"manager_is_jailbroken"] = @(env.isJailbroken);
+    report[@"privileged_scope_entered"] = @(privilegedScopeEntered);
+    NSError *error = nil;
+    NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:&error];
+    NSURL *file = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"Dopamine-Diagnostics-%@.json", NSUUID.UUID.UUIDString]]];
+    if (!json || ![json writeToURL:file options:NSDataWritingAtomic error:&error]) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Button_Environment_Diagnostics")
+            message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Close") style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[file] applicationActivities:nil];
+    share.popoverPresentationController.sourceView = self.view;
+    share.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
+    [self presentViewController:share animated:YES completion:nil];
+}
 
 - (void)refreshJailbreakAppsPressed
 {

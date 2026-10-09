@@ -164,3 +164,6 @@
 
 "App_Hide_Rules_Error_Title" = "AppHide rules could not be accessed";
 "App_Hide_Rules_Error_Body" = "The change could not be confirmed. Reopen this page to reload the saved state. Restart the target app after a successful change.";
+
+"Button_Environment_Diagnostics" = "Export environment diagnostics (read-only)";
+"Environment_Diagnostics_Consent" = "Reads jailbreak paths, mounts, file metadata and filtered hiding logs. Does not reboot, refresh apps, move files or modify hiding rules. Writes only a report in this app’s temporary directory for optional sharing. The report may include device paths, timestamps and relevant app identifiers; no passwords or account credentials are read.";

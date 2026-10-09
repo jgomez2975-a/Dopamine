@@ -160,3 +160,6 @@
 
 "App_Hide_Rules_Error_Title" = "无法访问按 App 隐藏规则";
 "App_Hide_Rules_Error_Body" = "未能确认本次操作成功。请重新进入此页读取已保存状态；保存成功后，请彻底退出并重新打开目标 App。";
+
+"Button_Environment_Diagnostics" = "导出环境诊断（只读）";
+"Environment_Diagnostics_Consent" = "只读取越狱路径、挂载、文件状态和筛选后的隐藏日志；不重启、不刷新应用、不移动文件、不修改隐藏规则。仅在本 App 临时目录生成报告，由你选择是否分享。报告可能包含设备路径、时间和相关 App 标识，不读取密码或账户凭据。";
