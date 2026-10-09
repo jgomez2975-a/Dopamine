@@ -161,3 +161,6 @@
 "Mount_Input_Message" = "Enter the original folder path. It will be bind-mounted read-only to a copy under /var/jb/mnt/.";
 "Error_Mount_Empty" = "Please enter a folder path.";
 "Empty_Mount_List" = "No mounts yet.";
+
+"App_Hide_Rules_Error_Title" = "AppHide rules could not be accessed";
+"App_Hide_Rules_Error_Body" = "The change could not be confirmed. Reopen this page to reload the saved state. Restart the target app after a successful change.";

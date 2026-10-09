@@ -31,6 +31,8 @@
 @property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *filteredApps;
 @property (nonatomic, strong) UISearchBar *searchBar;
 @property (nonatomic, strong) NSCache<NSString *, UIImage *> *iconCache;
+@property (nonatomic, strong) NSError *pendingRulesError;
+- (void)presentRulesError:(NSError *)error;
 - (UIImage *)iconForBundleID:(NSString *)bundleID;
 @end
 
@@ -1130,6 +1132,28 @@
     [self.tableView addGestureRecognizer:longPress];
 }
 
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+    if (self.pendingRulesError) {
+        NSError *error = self.pendingRulesError;
+        self.pendingRulesError = nil;
+        [self presentRulesError:error];
+    }
+}
+
+- (void)presentRulesError:(NSError *)error
+{
+    NSString *message = [NSString stringWithFormat:@"%@\n\n%@ (%@:%ld)",
+        DOLocalizedString(@"App_Hide_Rules_Error_Body"), error.localizedDescription,
+        error.domain, (long)error.code];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"App_Hide_Rules_Error_Title")
+        message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Close")
+        style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)donePressed
 {
     [self.navigationController popViewControllerAnimated:YES];
@@ -1144,14 +1168,21 @@
     NSArray *allApps = [workspace performSelector:NSSelectorFromString(@"allApplications")];
     DOEnvironmentManager *env = [DOEnvironmentManager sharedManager];
 
+    NSError *error = nil;
+    NSDictionary *rules = [env appHideRulesWithError:&error];
+    if (!rules) {
+        self.pendingRulesError = error;
+        return; // Do not display unreadable state as a list of unchecked apps.
+    }
+    [self.allApps removeAllObjects];
     for (id app in allApps) {
         NSString *bundleID = [app valueForKey:@"applicationIdentifier"];
         NSString *name = [app valueForKey:@"localizedName"];
         if (!bundleID || !name) continue;
         if ([bundleID hasPrefix:@"com.apple."]) continue;
 
-        BOOL hidden = [env isEnvironmentHiddenForBundleID:bundleID];
-        BOOL noInject = [env isEnvironmentNoInjectForBundleID:bundleID];
+        BOOL hidden = [rules[bundleID][@"HideEnvironment"] boolValue];
+        BOOL noInject = [rules[bundleID][@"HideNoInject"] boolValue];
         [self.allApps addObject:[@{
             @"bundleID": bundleID,
             @"name": name,
@@ -1334,7 +1365,12 @@
     NSString *bundleID = appInfo[@"bundleID"];
     BOOL hidden = sender.on;
 
-    [[DOEnvironmentManager sharedManager] setEnvironmentHidden:hidden forBundleID:bundleID];
+    NSError *error = nil;
+    if (![[DOEnvironmentManager sharedManager] setEnvironmentHidden:hidden forBundleID:bundleID error:&error]) {
+        [sender setOn:[appInfo[@"hidden"] boolValue] animated:YES];
+        [self presentRulesError:error];
+        return;
+    }
 
     for (NSMutableDictionary *dict in self.allApps) {
         if ([dict[@"bundleID"] isEqualToString:bundleID]) {
@@ -1343,6 +1379,8 @@
             break;
         }
     }
+
+    [self.tableView reloadData];
 
     UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [fb impactOccurred];
@@ -1354,14 +1392,18 @@
     if (gesture.state != UIGestureRecognizerStateBegan) return;
     CGPoint p = [gesture locationInView:self.tableView];
     NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:p];
-    if (!indexPath) return;
+    if (!indexPath || indexPath.row >= (NSInteger)self.filteredApps.count) return;
 
     NSDictionary *appInfo = self.filteredApps[indexPath.row];
     if (![appInfo[@"hidden"] boolValue]) return; // only meaningful when already hidden
     NSString *bundleID = appInfo[@"bundleID"];
 
     BOOL noInject = ![appInfo[@"noInject"] boolValue];
-    [[DOEnvironmentManager sharedManager] setEnvironmentNoInject:noInject forBundleID:bundleID];
+    NSError *error = nil;
+    if (![[DOEnvironmentManager sharedManager] setEnvironmentNoInject:noInject forBundleID:bundleID error:&error]) {
+        [self presentRulesError:error];
+        return;
+    }
 
     for (NSMutableDictionary *dict in self.allApps) {
         if ([dict[@"bundleID"] isEqualToString:bundleID]) {

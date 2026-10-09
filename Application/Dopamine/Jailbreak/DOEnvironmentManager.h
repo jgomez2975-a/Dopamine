@@ -91,10 +91,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setForkfixEnabled:(BOOL)enabled;
 - (NSString *)appHideRulesPath;
 - (NSDictionary *)appHideRules;
+- (nullable NSDictionary *)appHideRulesWithError:(NSError * _Nullable * _Nullable)error;
 - (BOOL)isEnvironmentHiddenForBundleID:(NSString *)bundleID;
-- (void)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID;
+- (BOOL)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID;
 - (BOOL)isEnvironmentNoInjectForBundleID:(NSString *)bundleID;
-- (void)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID;
+- (BOOL)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID;
+- (BOOL)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID error:(NSError * _Nullable * _Nullable)error;
+- (BOOL)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID error:(NSError * _Nullable * _Nullable)error;
 - (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs;
 
 - (void)mountDictionary:(NSDictionary *)dictionary writeToFile:(NSString *)path;

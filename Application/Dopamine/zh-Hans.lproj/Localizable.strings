@@ -157,3 +157,6 @@
 "Mount_Input_Message" = "输入原始文件夹路径，将以只读方式绑定挂载到 /var/jb/mnt/ 下的副本。";
 "Error_Mount_Empty" = "请输入文件夹路径。";
 "Empty_Mount_List" = "还没有挂载。";
+
+"App_Hide_Rules_Error_Title" = "无法访问按 App 隐藏规则";
+"App_Hide_Rules_Error_Body" = "未能确认本次操作成功。请重新进入此页读取已保存状态；保存成功后，请彻底退出并重新打开目标 App。";

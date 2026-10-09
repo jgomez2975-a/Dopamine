@@ -13,6 +13,7 @@
 #import <sys/utsname.h>
 #import <sys/stat.h>
 #import <unistd.h>
+#import <errno.h>
 #import <mach-o/dyld.h>
 #import <libgrabkernel2/libgrabkernel2.h>
 #import <libjailbreak/info.h>
@@ -769,72 +770,166 @@ extern char **environ;
     return @"/var/mobile/Library/Preferences/.DopamineAppHideRules.plist";
 }
 
+// AppHide persistence: begin (also compiled by Tests/run_app_hide_tests.py).
+- (NSError *)appHideError:(NSString *)message
+{
+    return [NSError errorWithDomain:@"Dopamine.AppHide" code:1
+                          userInfo:@{NSLocalizedDescriptionKey: message}];
+}
+
+// This helper is only called inside the privilege/sandbox scope below.
+- (NSDictionary *)readAppHideRulesWithError:(NSError **)error
+{
+    NSError *readError = nil;
+    NSData *data = [NSData dataWithContentsOfFile:self.appHideRulesPath
+                                        options:NSDataReadingUncached error:&readError];
+    if (!data) {
+        // A genuinely absent file is a new configuration, NOT an I/O failure.
+        if ([readError.domain isEqualToString:NSCocoaErrorDomain] &&
+            readError.code == NSFileReadNoSuchFileError) return @{};
+        if (error) *error = readError ?: [self appHideError:@"Cannot read AppHide rules."];
+        return nil;
+    }
+    id rules = [NSPropertyListSerialization propertyListWithData:data
+        options:NSPropertyListImmutable format:NULL error:&readError];
+    if (![rules isKindOfClass:NSDictionary.class]) {
+        if (error) *error = readError ?: [self appHideError:@"AppHide rules are not a dictionary."];
+        return nil;
+    }
+    for (id key in rules) {
+        id rule = rules[key];
+        if (![key isKindOfClass:NSString.class] || ![rule isKindOfClass:NSDictionary.class]) {
+            if (error) *error = [self appHideError:@"Invalid AppHide rule entry; existing file was not overwritten."];
+            return nil;
+        }
+        for (NSString *flag in @[@"HideEnvironment", @"HideNoInject"]) {
+            if (rule[flag] && ![rule[flag] isKindOfClass:NSNumber.class]) {
+                if (error) *error = [self appHideError:@"Invalid AppHide flag; existing file was not overwritten."];
+                return nil;
+            }
+        }
+    }
+    return rules;
+}
+
+- (BOOL)performAppHideIO:(BOOL (^)(NSError **))operation error:(NSError **)error
+{
+    __block BOOL entered = NO;
+    __block BOOL success = NO;
+    __block NSError *failure = nil;
+    // Serialize read-modify-write within this manager; do not elevate read and
+    // write separately, or nest the process-wide credential wrappers.
+    @synchronized (self) {
+        void (^work)(void) = ^{
+            entered = YES;
+            success = operation(&failure);
+        };
+        if (self.isJailbroken || geteuid() == 0) {
+            [self runAsRoot:^{ [self runUnsandboxed:work]; }];
+        } else {
+            [self runUnsandboxed:work];
+        }
+    }
+    if (!entered) failure = [self appHideError:@"Could not obtain access to AppHide rules."];
+    if (!success) {
+        failure = failure ?: [self appHideError:@"AppHide operation failed."];
+        NSLog(@"[AppHide] %@ (%@:%ld)", failure.localizedDescription, failure.domain, (long)failure.code);
+    }
+    if (error) *error = failure;
+    return success;
+}
+
+- (NSDictionary *)appHideRulesWithError:(NSError **)error
+{
+    __block NSDictionary *rules = nil;
+    [self performAppHideIO:^BOOL(NSError **failure) {
+        rules = [self readAppHideRulesWithError:failure];
+        return rules != nil;
+    } error:error];
+    return rules;
+}
+
 - (NSDictionary *)appHideRules
 {
-    NSDictionary *rules = [NSDictionary dictionaryWithContentsOfFile:[self appHideRulesPath]];
-    return rules ?: @{};
+    // Compatibility accessor. The UI and all mutations use the error-aware API.
+    return [self appHideRulesWithError:nil] ?: @{};
 }
 
 - (BOOL)isEnvironmentHiddenForBundleID:(NSString *)bundleID
 {
-    if (!bundleID) return NO;
-    NSDictionary *appRule = [self appHideRules][bundleID];
-    if (appRule) {
-        return [appRule[@"HideEnvironment"] boolValue];
-    }
-    return NO;
+    return bundleID.length && [[self appHideRules][bundleID][@"HideEnvironment"] boolValue];
 }
 
 - (BOOL)isEnvironmentNoInjectForBundleID:(NSString *)bundleID
 {
-    if (!bundleID) return NO;
-    NSDictionary *appRule = [self appHideRules][bundleID];
-    if (appRule) {
-        return [appRule[@"HideNoInject"] boolValue];
-    }
-    return NO;
+    return bundleID.length && [[self appHideRules][bundleID][@"HideNoInject"] boolValue];
 }
 
-- (void)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID
+- (BOOL)updateAppHideRuleForBundleID:(NSString *)bundleID
+                            change:(void (^)(NSMutableDictionary *))change
+                             error:(NSError **)error
 {
-    if (!bundleID) return;
-
-    NSMutableDictionary *rules = [[self appHideRules] mutableCopy];
-    if (hidden) {
-        NSMutableDictionary *appRule = [rules[bundleID] mutableCopy] ?: [NSMutableDictionary dictionary];
-        appRule[@"HideEnvironment"] = @YES;
-        rules[bundleID] = appRule;
-    } else {
-        [rules removeObjectForKey:bundleID];
+    if (!bundleID.length) {
+        if (error) *error = [self appHideError:@"Missing application bundle identifier."];
+        return NO;
     }
-
-    NSString *path = [self appHideRulesPath];
-    [rules writeToFile:path atomically:YES];
-    chmod(path.fileSystemRepresentation, 0644);
-
-    NSLog(@"[AppHide] %@ -> %@", bundleID, hidden ? @"hidden" : @"visible");
+    return [self performAppHideIO:^BOOL(NSError **failure) {
+        NSDictionary *existing = [self readAppHideRulesWithError:failure];
+        if (!existing) return NO; // Never replace unreadable/corrupt rules with {}.
+        NSMutableDictionary *rules = [existing mutableCopy];
+        NSMutableDictionary *rule = [rules[bundleID] mutableCopy] ?: [NSMutableDictionary dictionary];
+        change(rule);
+        if (rule.count) rules[bundleID] = rule;
+        else [rules removeObjectForKey:bundleID];
+        NSData *data = [NSPropertyListSerialization dataWithPropertyList:rules
+            format:NSPropertyListBinaryFormat_v1_0 options:0 error:failure];
+        if (!data || ![data writeToFile:self.appHideRulesPath options:NSDataWritingAtomic error:failure]) return NO;
+        if (chmod(self.appHideRulesPath.fileSystemRepresentation, 0644) != 0) {
+            int savedErrno = errno;
+            if (failure) *failure = [NSError errorWithDomain:NSPOSIXErrorDomain code:savedErrno userInfo:nil];
+            return NO;
+        }
+        NSDictionary *readBack = [self readAppHideRulesWithError:failure];
+        if (![readBack isEqualToDictionary:rules]) {
+            if (failure && !*failure) *failure = [self appHideError:@"AppHide read-back verification failed."];
+            return NO;
+        }
+        NSLog(@"[AppHide] saved and verified %@", bundleID);
+        return YES;
+    } error:error];
 }
 
-- (void)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID
+- (BOOL)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID error:(NSError **)error
 {
-    if (!bundleID) return;
-
-    NSMutableDictionary *rules = [[self appHideRules] mutableCopy];
-    NSMutableDictionary *appRule = [rules[bundleID] mutableCopy] ?: [NSMutableDictionary dictionary];
-    if (noInject) {
-        appRule[@"HideNoInject"] = @YES;
-        appRule[@"HideEnvironment"] = @YES; // no-injection implies hidden
-    } else {
-        [appRule removeObjectForKey:@"HideNoInject"];
-    }
-    rules[bundleID] = appRule;
-
-    NSString *path = [self appHideRulesPath];
-    [rules writeToFile:path atomically:YES];
-    chmod(path.fileSystemRepresentation, 0644);
-
-    NSLog(@"[AppHide] %@ no-inject -> %@", bundleID, noInject ? @"on" : @"off");
+    return [self updateAppHideRuleForBundleID:bundleID change:^(NSMutableDictionary *rule) {
+        if (hidden) rule[@"HideEnvironment"] = @YES;
+        else {
+            [rule removeObjectForKey:@"HideEnvironment"];
+            [rule removeObjectForKey:@"HideNoInject"];
+        }
+    } error:error];
 }
+
+- (BOOL)setEnvironmentHidden:(BOOL)hidden forBundleID:(NSString *)bundleID
+{
+    return [self setEnvironmentHidden:hidden forBundleID:bundleID error:nil];
+}
+
+- (BOOL)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID error:(NSError **)error
+{
+    return [self updateAppHideRuleForBundleID:bundleID change:^(NSMutableDictionary *rule) {
+        if (noInject) {
+            rule[@"HideNoInject"] = @YES;
+            rule[@"HideEnvironment"] = @YES;
+        } else [rule removeObjectForKey:@"HideNoInject"];
+    } error:error];
+}
+
+- (BOOL)setEnvironmentNoInject:(BOOL)noInject forBundleID:(NSString *)bundleID
+{
+    return [self setEnvironmentNoInject:noInject forBundleID:bundleID error:nil];
+}
+// AppHide persistence: end.
 
 - (NSArray<NSString *> *)allEnvironmentHiddenBundleIDs
 {
