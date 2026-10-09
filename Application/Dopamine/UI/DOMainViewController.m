@@ -250,7 +250,12 @@
 - (void)repairVisibilityAfterEnvironmentUpdateIfNeeded
 {
     DOEnvironmentManager *environmentManager = [DOEnvironmentManager sharedManager];
-    if (![environmentManager isJailbroken]) return;
+    // Do NOT gate on isJailbroken. It resolves through jbclient_dopamine_is_jailbroken,
+    // which is cached once per app launch and reports NO for a hidden jailbreak - so in the
+    // broken (stuck hidden) state this line returned immediately and the repair never ran:
+    // no alert, no repair, and the Hide Jailbreak switch had to be cycled by hand every
+    // time. The real jailbreak root resolves even then, so test that instead.
+    if (![environmentManager jailbreakRootIntact]) return;
     // Do NOT bail out just because the jailbreak reads as hidden. A stuck hidden state is
     // exactly what removes the store icon and every tweak pane from Settings, and it reads
     // as hidden precisely the same way a deliberate hide does - which is why this used to
