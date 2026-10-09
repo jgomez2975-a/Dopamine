@@ -236,24 +236,48 @@
     [self repairVisibilityAfterEnvironmentUpdateIfNeeded];
 }
 
-// A basebin update is applied by a userspace reboot that kills this process, so the
-// recovery runs here instead: on the first launch after a stage, do what turning the
-// Hide Jailbreak switch off does - re-register the jailbreak apps and relaunch
-// Settings.app. Without it the store and every tweak pane stayed missing until the
-// user cycled that switch by hand. Runs at most once per staged update.
+// Running the launch-time repair unconditionally restarted SpringBoard, but running it
+// only after a staged basebin update left the other failure alone: the jailbreak stays
+// visible, /var/jb stays in place, and yet the store has no LaunchServices registration
+// and Settings is an un-injected process - the state the Hide Jailbreak switch used to
+// be the only way out of. So probe for it, and repair only when the probe says so.
+// The alert reports what was found: it only appears when something really was broken.
 - (void)repairVisibilityAfterEnvironmentUpdateIfNeeded
 {
-    NSString *flagPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/pending_visibility_repair"];
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm fileExistsAtPath:flagPath]) return;
-    [fm removeItemAtPath:flagPath error:nil];
-
     DOEnvironmentManager *environmentManager = [DOEnvironmentManager sharedManager];
     if (![environmentManager isJailbroken]) return;
     if ([environmentManager isJailbreakHidden]) return;
 
+    static BOOL didRunThisLaunch = NO;
+    if (didRunThisLaunch) return;
+    didRunThisLaunch = YES;
+
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
-        [environmentManager repairJailbreakVisibilityAfterUpdate];
+        NSString *flagPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/pending_visibility_repair"];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        BOOL afterUpdate = [fm fileExistsAtPath:flagPath];
+        if (afterUpdate) [fm removeItemAtPath:flagPath error:nil];
+
+        BOOL unregistered = [environmentManager jailbreakAppsUnregistered];
+        BOOL straySafeMode = [environmentManager hasStraySafeMode];
+
+        if (!unregistered && !straySafeMode && !afterUpdate) return;
+
+        [environmentManager repairJailbreakVisibility];
+
+        NSString *report = [NSString stringWithFormat:
+            @"store apps unregistered: %@\nstray safe_mode: %@\nafter basebin update: %@\nrepair: done",
+            unregistered ? @"YES" : @"no",
+            straySafeMode ? @"YES" : @"no",
+            afterUpdate ? @"YES" : @"no"];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Visibility repair"
+                                                                          message:report
+                                                                   preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+        });
     });
 }
 
