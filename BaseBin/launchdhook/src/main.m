@@ -192,8 +192,11 @@ __attribute__((constructor)) static void initializer(void)
 			NSString *autoSafeMode = [safeModeRoot stringByAppendingPathComponent:@"basebin/.safe_mode"];
 			NSString *userSafeMode = [safeModeRoot stringByAppendingPathComponent:@"basebin/.safe_mode_user"];
 			NSString *autoSafeModeMark = [safeModeRoot stringByAppendingPathComponent:@"basebin/.safe_mode_auto"];
+			// A deliberate "Tweak Injection off" from Dopamine's Settings writes the
+			// same .safe_mode, so it must not be mistaken for a stray one.
+			NSString *injectOffSafeMode = [safeModeRoot stringByAppendingPathComponent:@"basebin/.safe_mode_inject_off"];
 			NSFileManager *safeModeFM = [NSFileManager defaultManager];
-			if ([safeModeFM fileExistsAtPath:autoSafeMode] && ![safeModeFM fileExistsAtPath:userSafeMode]) {
+			if ([safeModeFM fileExistsAtPath:autoSafeMode] && ![safeModeFM fileExistsAtPath:userSafeMode] && ![safeModeFM fileExistsAtPath:injectOffSafeMode]) {
 				[safeModeFM removeItemAtPath:autoSafeMode error:nil];
 				[safeModeFM removeItemAtPath:autoSafeModeMark error:nil];
 			}
