@@ -1423,6 +1423,8 @@ extern char **environ;
                 if ([self isJailbroken]) {
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
                     [[NSFileManager defaultManager] removeItemAtPath:safeModePath error:nil];
+                    [[NSFileManager defaultManager] removeItemAtPath:JBROOT_PATH(@"/basebin/.safe_mode_user") error:nil];
+                    [[NSFileManager defaultManager] removeItemAtPath:JBROOT_PATH(@"/basebin/.safe_mode_auto") error:nil];
 
                     [self setForkfixEnabled:YES];
 
