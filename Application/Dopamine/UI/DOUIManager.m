@@ -86,6 +86,23 @@
     return releases;
 }
 
+// The staged-basebin token must survive the jailbreak being hidden. It used to live
+// in DOPreferenceManager, i.e. /var/mobile/Library/Preferences/com.opa334.Dopamine.plist
+// - which runJailbreakLibraryAudit quarantines on purpose. Once that file was moved
+// the token read back nil, so environmentUpdateAvailable reported a pending update on
+// every single launch and each one ended in another userspace reboot. Keep it in the
+// app container instead: the audit never touches it.
+- (NSString *)stagedBasebinTokenPath
+{
+    return [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/staged_basebin_token"];
+}
+
+- (NSString *)stagedBasebinToken
+{
+    return [NSString stringWithContentsOfFile:[self stagedBasebinTokenPath]
+                                     encoding:NSUTF8StringEncoding
+                                        error:nil];
+}
 - (BOOL)environmentUpdateAvailable
 {
     if (![[DOEnvironmentManager sharedManager] jailbrokenVersion])
@@ -106,8 +123,7 @@
     // exactly ONCE per distinct basebin build and then stays quiet.
     NSString *token = [self bundledBasebinToken];
     if (!token) return NO;
-    NSString *stagedToken = [_preferenceManager preferenceValueForKey:@"stagedBasebinToken"];
-    return ![token isEqualToString:stagedToken];
+    return ![token isEqualToString:[self stagedBasebinToken]];
 }
 
 // FNV-1a over the bundled basebin.tar: identifies a basebin build without
@@ -132,7 +148,10 @@
 {
     NSString *token = [self bundledBasebinToken];
     if (token) {
-        [_preferenceManager setPreferenceValue:token forKey:@"stagedBasebinToken"];
+        [token writeToFile:[self stagedBasebinTokenPath]
+                atomically:YES
+                  encoding:NSUTF8StringEncoding
+                     error:nil];
     }
 }
 
