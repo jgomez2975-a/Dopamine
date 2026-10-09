@@ -579,13 +579,21 @@ extern char **environ;
 - (void)setTweakInjectionEnabled:(BOOL)enabled
 {
     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
+    NSString *injectOffMarkerPath = JBROOT_PATH(@"/basebin/.safe_mode_inject_off");
     if ([self isJailbroken]) {
         [self runAsRoot:^{
             [self runUnsandboxed:^{
                 if (enabled) {
                     [[NSFileManager defaultManager] removeItemAtPath:safeModePath error:nil];
+                    [[NSFileManager defaultManager] removeItemAtPath:injectOffMarkerPath error:nil];
                 }
                 else {
+                    // This .safe_mode is a deliberate choice, and on its own it is
+                    // byte-for-byte indistinguishable from the file the watchdog
+                    // leaves behind after a userspace panic - which the launchd boot
+                    // path and the 10-second self-heal both clear. The marker is what
+                    // tells them to leave it alone.
+                    [[NSData data] writeToFile:injectOffMarkerPath atomically:YES];
                     [[NSData data] writeToFile:safeModePath atomically:YES];
                 }
             }];
