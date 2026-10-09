@@ -177,6 +177,29 @@ __attribute__((constructor)) static void initializer(void)
 	// (the jailbreak is visible at that point), so it never actually fired.
 	app_hide_schedule_uicache();
 
+	// A .safe_mode on its own is never a user decision: the watchdog writes it when
+	// it intercepts a userspace panic, and tweak injection is keyed off it (see
+	// systemhook main.c: ".safe_mode present -> do not load tweaks"). Left behind, it
+	// made every tweak pane disappear from Settings after an update reboot, and the
+	// only way out was to cycle the Hide Jailbreak switch so its unhide path deleted
+	// the file. Only a .safe_mode paired with .safe_mode_user is a real hide request.
+	// Normalise the automatic one away on every boot, whether or not the jailbreak
+	// was hidden when the reboot started.
+	{
+		const char *jbrootForSafeMode = gSystemInfo.jailbreakInfo.rootPath;
+		if (jbrootForSafeMode && jbrootForSafeMode[0]) {
+			NSString *safeModeRoot = [NSString stringWithUTF8String:jbrootForSafeMode];
+			NSString *autoSafeMode = [safeModeRoot stringByAppendingPathComponent:@"basebin/.safe_mode"];
+			NSString *userSafeMode = [safeModeRoot stringByAppendingPathComponent:@"basebin/.safe_mode_user"];
+			NSString *autoSafeModeMark = [safeModeRoot stringByAppendingPathComponent:@"basebin/.safe_mode_auto"];
+			NSFileManager *safeModeFM = [NSFileManager defaultManager];
+			if ([safeModeFM fileExistsAtPath:autoSafeMode] && ![safeModeFM fileExistsAtPath:userSafeMode]) {
+				[safeModeFM removeItemAtPath:autoSafeMode error:nil];
+				[safeModeFM removeItemAtPath:autoSafeModeMark error:nil];
+			}
+		}
+	}
+
 	sysctlbyname_orig = sysctlbyname;
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)sysctlbyname, (void *)sysctlbyname_hook, NULL);
 
