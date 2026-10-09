@@ -272,13 +272,25 @@
         // hide half ran first - the hide is what unregisters the bundles (so the
         // following uicache -a has to rebuild the icon cache for real) and what unmounts
         // the fakelib overlay that the unhide then re-mounts.
+        // Show this before touching anything. If the device reboots without this alert
+        // ever appearing, the reboot is not coming from the repair.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Repair step 1 of 2"
+                                                                          message:@"About to run the repair. Dismiss this and wait. If the device reboots before you ever see this alert, the reboot is not from the repair."
+                                                                   preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+        });
+
+        [NSThread sleepForTimeInterval:6.0];
         [environmentManager repairJailbreakVisibility];
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Jailbreak visibility"
-                                                                          message:@"Jailbreak visibility repaired - the store icon and the tweak pages were rebuilt."
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Repair step 2 of 2"
+                                                                          message:@"Repair finished."
                                                                    preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self.presentedViewController dismissViewControllerAnimated:NO completion:nil];
             [self presentViewController:alert animated:YES completion:nil];
         });
     });
