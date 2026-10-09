@@ -172,12 +172,38 @@ __attribute__((constructor)) static void initializer(void)
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)sysctlbyname, (void *)sysctlbyname_hook, NULL);
 
 	if (getenv("DOPAMINE_IS_HIDDEN") != 0) {
-		// The jailbreak was hidden when the userspace reboot started. Two cases:
-		//   1. Manual "Hide Jailbreak" (persistent): stay hidden — unmount fakelib
-		//      again and disable the systemwide domain (the old behavior).
-		//   2. A [NoInject] app was running (transient): its launchd-side restore
-		//      never fired because launchd was killed, so restore it now.
-		if (!app_hide_restore_after_userspace_reboot()) {
+		// The jailbreak was hidden when the userspace reboot started. Stay hidden
+		// ONLY when the user explicitly asked for it, i.e. a .safe_mode that is
+		// paired with .safe_mode_user (written by Dopamine's Hide Jailbreak switch).
+		//
+		// Everything else must be brought back up:
+		//   - .safe_mode alone is written by the watchdog when it intercepts a
+		//     userspace panic. That is not a hide request, and treating it as one
+		//     removed /var/jb, so Sileo could not launch and every tweak pane
+		//     disappeared from Settings until the hide switch was cycled by hand.
+		//   - a [NoInject] app was running and its launchd-side restore never fired
+		//     because launchd was killed.
+		//   - a leftover .safe_mode from a build that predates .safe_mode_user.
+		//
+		// An unclassifiable state is also treated as "restore": failing towards a
+		// working jailbreak is the only safe direction, because the reverse leaves
+		// the device with no way back other than the hide switch.
+		bool stayHidden = false;
+		const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+		if (jbroot && jbroot[0]) {
+			NSString *jbRootStr = [NSString stringWithUTF8String:jbroot];
+			NSString *safeModePath = [jbRootStr stringByAppendingPathComponent:@"basebin/.safe_mode"];
+			NSString *userSafeModePath = [jbRootStr stringByAppendingPathComponent:@"basebin/.safe_mode_user"];
+			NSString *autoSafeModePath = [jbRootStr stringByAppendingPathComponent:@"basebin/.safe_mode_auto"];
+			NSFileManager *fileManager = [NSFileManager defaultManager];
+			stayHidden = [fileManager fileExistsAtPath:safeModePath] && [fileManager fileExistsAtPath:userSafeModePath];
+			if (!stayHidden) {
+				[fileManager removeItemAtPath:safeModePath error:nil];
+				[fileManager removeItemAtPath:autoSafeModePath error:nil];
+			}
+		}
+
+		if (stayHidden) {
 			// Manual hide: keep the jailbreak hidden. fakelib had to be mounted
 			// again before the reboot; unmount it now. The jbserver is not up at
 			// this point, so host our own so jbctl can talk to it.
@@ -188,9 +214,15 @@ __attribute__((constructor)) static void initializer(void)
 			// Also disable the systemwide domain again
 			systemwide_domain_set_enabled(false);
 		}
+		else {
+			// Bring the jailbreak back up: relink /var/jb and restore the files the
+			// hide quarantined, so jailbreak apps and tweak settings work again.
+			app_hide_restore_after_userspace_reboot();
+		}
 
 		// No need to keep this around
 		unsetenv("DOPAMINE_IS_HIDDEN");
+	}
 	}
 
 	// This will ensure launchdhook is always reinjected after userspace reboots
