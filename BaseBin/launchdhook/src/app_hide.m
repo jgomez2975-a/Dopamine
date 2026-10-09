@@ -425,15 +425,13 @@ static void app_hide_do_restore(void)
 // stay hidden.
 bool app_hide_restore_after_userspace_reboot(void)
 {
-	// A manual "Hide Jailbreak" writes <jbroot>/basebin/.safe_mode; a no-inject
-	// app does not. Only auto-restore the transient (no-inject) case.
+	// Relink /var/jb and undo the hide. Whether the device should be hidden at all
+	// is the caller's decision (main.m): a .safe_mode the user did not ask for - an
+	// intercepted userspace panic, or a leftover from an older build - must not keep
+	// the jailbreak hidden, because that removes /var/jb and leaves Sileo unable to
+	// launch with every tweak pane missing from Settings.
 	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
 	if (!jbroot || !jbroot[0]) return false;
-
-	NSString *safeModePath = [[NSString stringWithUTF8String:jbroot] stringByAppendingPathComponent:@"basebin/.safe_mode"];
-	if ([[NSFileManager defaultManager] fileExistsAtPath:safeModePath]) {
-		return false;
-	}
 
 	// Transient hide leftover. fakelib was already re-mounted by
 	// ensure_fakelib_mounted() during the reboot, so only relink /var/jb and
