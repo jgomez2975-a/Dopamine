@@ -520,6 +520,24 @@ static bool app_hide_repair_half_hidden(void)
 
 	// /var/jb present: nothing to fix.
 	if (access("/var/jb", F_OK) == 0) {
+		// Except for a .safe_mode nobody asked for. The watchdog writes it when it
+		// intercepts a userspace panic, and tweak injection is keyed off it, so every
+		// process launched afterwards loads no tweaks and the tweak pages in Settings
+		// stay empty - the other half of the damage the /var/jb repair above handles.
+		// /var/jb exists here, so this cannot be a hide in progress; a real choice
+		// always carries its own marker.
+		NSString *straySafeMode = [jbRootStr stringByAppendingPathComponent:@"basebin/.safe_mode"];
+		NSString *strayAutoMark = [jbRootStr stringByAppendingPathComponent:@"basebin/.safe_mode_auto"];
+		NSString *userHideMark = [jbRootStr stringByAppendingPathComponent:@"basebin/.safe_mode_user"];
+		NSString *injectOffMark = [jbRootStr stringByAppendingPathComponent:@"basebin/.safe_mode_inject_off"];
+		NSFileManager *selfhealFM = [NSFileManager defaultManager];
+		if ([selfhealFM fileExistsAtPath:straySafeMode] &&
+		    ![selfhealFM fileExistsAtPath:userHideMark] &&
+		    ![selfhealFM fileExistsAtPath:injectOffMark]) {
+			app_hide_log(@"selfheal: stray .safe_mode while visible -> clearing so tweaks inject again");
+			[selfhealFM removeItemAtPath:straySafeMode error:nil];
+			[selfhealFM removeItemAtPath:strayAutoMark error:nil];
+		}
 		gHideInFlight = false;
 		gHideStartedAt = 0;
 		return false;
