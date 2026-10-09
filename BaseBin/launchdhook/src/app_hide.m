@@ -395,7 +395,7 @@ static void app_hide_do_hide(void)
 //
 // Retried, because the callers that matter here run during early boot, before lsd
 // and installd are ready to accept a registration.
-static void app_hide_schedule_uicache(void)
+void app_hide_schedule_uicache(void)
 {
 	for (int attempt = 0; attempt < 4; attempt++) {
 		int64_t delaySeconds = 5 + (int64_t)attempt * 15;
