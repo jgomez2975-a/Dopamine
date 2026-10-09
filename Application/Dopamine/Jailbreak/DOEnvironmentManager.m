@@ -578,25 +578,19 @@ extern char **environ;
 static BOOL gSuppressDevmodeOidSwap = NO;
 - (void)repairJailbreakVisibility
 {
-    // The hand-written replay of the switch is gone. Reimplementing the hide half step by
-    // step left the device in a state that rebooted the moment this app was opened again,
-    // because those steps have to run through setJailbreakHidden: to keep their ordering
-    // and their guards. Driving the real calls is both proven and safe.
+    // The delayed kill loop that used to live here is gone. Repeatedly terminating
+    // Settings is what changed between the build that survived a userspace reboot and the
+    // two that rebooted on the next launch of this app, and terminateRunningAppWithBundleID:
+    // walks the whole process table, so a bad match there is a plausible way to take the
+    // device down with it. One kill before the cycle is enough to stop Settings from being
+    // the process that survives across the broken window, and setJailbreakHidden: itself
+    // already kills it once more when the cycle finishes.
+    [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
+
     gSuppressDevmodeOidSwap = YES;
     [self setJailbreakHidden:YES];
     gSuppressDevmodeOidSwap = NO;
     [self setJailbreakHidden:NO];
-
-    // Settings.app starts the instant it is tapped, and a process that starts before the
-    // fakelib overlay is back never gains tweak injection afterwards - which is why the
-    // store returned while the tweak pages stayed empty. Keep clearing the app for a while
-    // so any instance that starts during the rebuild is thrown away.
-    for (NSNumber *delay in @[@5, @15, @30, @45]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)),
-                       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
-        });
-    }
 }
 - (void)unregisterJailbreakApps
 {
