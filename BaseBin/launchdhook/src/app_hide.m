@@ -28,6 +28,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include <sys/mount.h>
+#include <dirent.h>
+#include <string.h>
+#include <stdio.h>
 
 #include <libjailbreak/libjailbreak.h>
 #include <xpc_private.h>
@@ -395,12 +398,49 @@ static void app_hide_do_hide(void)
 //
 // Retried, because the callers that matter here run during early boot, before lsd
 // and installd are ready to accept a registration.
+// Drop the registration of every jailbreak app, so the "uicache -a" that follows has to
+// rebuild it instead of finding the cache already consistent.
+//
+// This is the half that was missing. While the global hide was active these bundles were
+// removed from the app database, so a plain "uicache -a" sees nothing to do and returns -
+// which is why the store icon stayed missing from the home screen after a restore, and why
+// cycling the Hide Jailbreak switch by hand was the only way to get it back: that route ran
+// the app-side pair (unregisterJailbreakApps, then refreshJailbreakApps) and therefore
+// unregistered first. Doing it from launchd keeps it working even when no app process is
+// involved, for example after the self-heal relinks /var/jb during boot.
+static void app_hide_unregister_jb_apps(void)
+{
+	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+	if (!jbroot || !jbroot[0]) return;
+
+	char applications[PATH_MAX];
+	snprintf(applications, sizeof(applications), "%s/Applications", jbroot);
+
+	DIR *dir = opendir(applications);
+	if (!dir) return;
+
+	struct dirent *entry;
+	while ((entry = readdir(dir)) != NULL) {
+		if (entry->d_name[0] == '.') continue;
+
+		size_t nameLen = strlen(entry->d_name);
+		if (nameLen < 5) continue;
+		if (strcmp(entry->d_name + nameLen - 4, ".app") != 0) continue;
+
+		char appPath[PATH_MAX];
+		snprintf(appPath, sizeof(appPath), "%s/%s", applications, entry->d_name);
+		exec_cmd("/var/jb/usr/bin/uicache", "-u", appPath, NULL);
+	}
+	closedir(dir);
+}
+
 void app_hide_schedule_uicache(void)
 {
 	for (int attempt = 0; attempt < 4; attempt++) {
 		int64_t delaySeconds = 5 + (int64_t)attempt * 15;
 		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delaySeconds * NSEC_PER_SEC),
 			dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+				app_hide_unregister_jb_apps();
 				exec_cmd("/var/jb/usr/bin/uicache", "-a", NULL);
 			});
 	}
