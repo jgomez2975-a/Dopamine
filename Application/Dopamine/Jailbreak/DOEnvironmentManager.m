@@ -480,13 +480,54 @@ extern char **environ;
     }];
 }
 
+// Every bundle under /var/jb/Applications must have a LaunchServices proxy. When the
+// jailbreak is visible but they have none, the store icon is gone from the home
+// screen even though its files are all there - the state that only the Hide Jailbreak
+// switch (whose unhide path runs uicache -a) used to clear.
+- (BOOL)jailbreakAppsUnregistered
+{
+    NSString *appsPath = JBROOT_PATH(@"/Applications");
+    NSArray *bundles = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsPath error:nil];
+    if (bundles.count == 0) return NO;
+
+    Class proxyClass = NSClassFromString(@"LSApplicationProxy");
+    if (!proxyClass) return NO;
+
+    for (NSString *bundle in bundles) {
+        if (![bundle hasSuffix:@".app"]) continue;
+
+        NSString *infoPath = [[appsPath stringByAppendingPathComponent:bundle] stringByAppendingPathComponent:@"Info.plist"];
+        NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+        NSString *bundleID = info[@"CFBundleIdentifier"];
+        if (!bundleID.length) continue;
+
+        id proxy = [proxyClass performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
+        if (!proxy) return YES;
+    }
+
+    return NO;
+}
+
+// A .safe_mode with neither a hide marker nor an injection-off marker is the file the
+// watchdog leaves behind after a userspace panic. While it exists systemhook skips
+// tweak loading in every process it spawns, which is what empties the tweak pages in
+// Settings.
+- (BOOL)hasStraySafeMode
+{
+    NSString *base = JBROOT_PATH(@"/basebin");
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:[base stringByAppendingPathComponent:@".safe_mode"]]) return NO;
+    if ([fm fileExistsAtPath:[base stringByAppendingPathComponent:@".safe_mode_user"]]) return NO;
+    if ([fm fileExistsAtPath:[base stringByAppendingPathComponent:@".safe_mode_inject_off"]]) return NO;
+    return YES;
+}
 // Applying a new basebin swaps /var/jb/basebin and reboots the userspace. The files
 // under /var/jb/Applications survive, but their LaunchServices registrations do not,
 // and a process that was already running never gains systemhook injection later - so
 // the store and every tweak pane stayed missing until the Hide Jailbreak switch was
 // cycled by hand, whose unhide path does exactly this. Run the same recovery once,
 // on the first launch after the update that needed it.
-- (void)repairJailbreakVisibilityAfterUpdate
+- (void)repairJailbreakVisibility
 {
     void (^repair)(void) = ^{
         jbclient_platform_set_systemwide_domain_enabled(true);
