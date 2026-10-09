@@ -257,19 +257,14 @@
 - (void)repairVisibilityAfterEnvironmentUpdateIfNeeded
 {
     DOEnvironmentManager *environmentManager = [DOEnvironmentManager sharedManager];
-    // Do NOT gate on isJailbroken. It resolves through jbclient_dopamine_is_jailbroken,
-    // which is cached once per app launch and reports NO for a hidden jailbreak - so in the
-    // broken (stuck hidden) state this line returned immediately and the repair never ran:
-    // no alert, no repair, and the Hide Jailbreak switch had to be cycled by hand every
-    // time. The real jailbreak root resolves even then, so test that instead.
-    if (![environmentManager jailbreakRootIntact]) return;
-    // Do NOT bail out just because the jailbreak reads as hidden. A stuck hidden state is
-    // exactly what removes the store icon and every tweak pane from Settings, and it reads
-    // as hidden precisely the same way a deliberate hide does - which is why this used to
-    // give up and the Hide Jailbreak switch had to be cycled by hand. The repair itself
-    // checks for .safe_mode_user, so a real hide request is still respected.
 
-    DOEnvironmentManager *environmentManager = [DOEnvironmentManager sharedManager];
+    // No gate of any kind any more, on purpose. Four builds in a row produced no alert on
+    // the device, and every gate that could have explained that has now been removed one at
+    // a time: isJailbroken (resolved through jbclient_dopamine_is_jailbroken, cached once
+    // per app launch, and reported NO for a hidden jailbreak), the boot token, the
+    // safe-mode marker, and finally the jailbreak-root test. What remains untested is the
+    // repair itself, and the only way to tell a blocking gate apart from a repair that does
+    // not work is to show the state and run it. This build does both.
 
     // Nothing is gated any more, and that is deliberate. Four builds in a row produced no
     // alert on the device, and every gate that could have explained it has been removed one
