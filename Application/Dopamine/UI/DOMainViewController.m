@@ -266,7 +266,7 @@
         [environmentManager repairJailbreakVisibility];
 
         NSString *report = [NSString stringWithFormat:
-            @"store apps unregistered: %@\nstray safe_mode: %@\nafter basebin update: %@\nrepair: done",
+            @"store apps unregistered: %@\nstray safe_mode: %@\nafter basebin update: %@\nrepair: done (incl. devmode_oidswap off)",
             unregistered ? @"YES" : @"no",
             straySafeMode ? @"YES" : @"no",
             afterUpdate ? @"YES" : @"no"];
