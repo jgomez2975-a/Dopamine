@@ -59,7 +59,14 @@ NS_ASSUME_NONNULL_BEGIN
 // Same recovery the Hide Jailbreak switch performs when it is turned back off:
 // re-register the jailbreak apps and restart Settings.app. Needed after a basebin
 // update, which swaps /var/jb/basebin and reboots the userspace.
-- (void)repairJailbreakVisibilityAfterUpdate;
+- (void)repairJailbreakVisibility;
+
+// Probes deciding whether that repair is needed at all. Re-registering every launch
+// restarts SpringBoard for nothing, so it only runs when one of these says the
+// jailbreak is visible but broken - which is exactly the state the Hide Jailbreak
+// switch used to be the only way out of.
+- (BOOL)jailbreakAppsUnregistered;
+- (BOOL)hasStraySafeMode;
 - (void)reboot;
 - (void)changeMobilePassword:(NSString *)newPassword;
 - (NSError*)updateEnvironment;
