@@ -1442,6 +1442,15 @@ extern char **environ;
                     // again. Must run AFTER the /var/jb symlink is re-created,
                     // because jbctl lives at /var/jb/basebin/jbctl.
                     [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode_oidswap", @"off"]];
+
+                    // Settings.app is almost certainly still the process that was
+                    // running while the jailbreak was hidden. iOS keeps it alive, and
+                    // a process spawned without systemhook injection never gains it
+                    // later, so Settings kept showing no tweak panes even after the
+                    // jailbreak was fully restored - reloading the bundles does not
+                    // help a process that has no loader. Kill it so the next open is
+                    // injected; this is exactly what a respring was doing by hand.
+                    [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
                 }
             }
         }
