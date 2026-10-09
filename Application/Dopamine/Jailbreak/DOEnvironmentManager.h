@@ -55,6 +55,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)rebootUserspaceAfterJailbreak;
 - (void)rebuildIconCache;
 - (void)refreshJailbreakApps;
+
+// Same recovery the Hide Jailbreak switch performs when it is turned back off:
+// re-register the jailbreak apps and restart Settings.app. Needed after a basebin
+// update, which swaps /var/jb/basebin and reboots the userspace.
+- (void)repairJailbreakVisibilityAfterUpdate;
 - (void)reboot;
 - (void)changeMobilePassword:(NSString *)newPassword;
 - (NSError*)updateEnvironment;
