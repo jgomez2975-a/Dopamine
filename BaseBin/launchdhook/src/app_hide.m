@@ -502,8 +502,19 @@ static bool app_hide_repair_half_hidden(void)
 	// the manual toggle. If the flag is set but not one tracked no-inject app is
 	// still alive, the hide is stale: clear it and carry on to the repair below.
 	if (app_hide_is_currently_hidden()) {
+		// gNoInjectRefCount is the authoritative signal. app_hide_global_hide raises it
+		// and only app_hide_global_restore lowers it, which happens once the LAST hidden
+		// app exits, so a non-zero refcount means a hide is meant to be in force right
+		// now. Judging staleness from the tracked pid list alone undid real hides: that
+		// list can read empty while the hidden app is still running (pidversion churn, a
+		// launch that starts in the background and is promoted, a pid that was never
+		// committed), and the repair below then relinked /var/jb - so the app detected
+		// the jailbreak again a few seconds after it had been hidden, which is the
+		// "Hide for App does not stick" failure. The grace period is widened as well so
+		// a slow launch cannot be mistaken for a missed restore either.
 		bool stale = (gHideStartedAt != 0) &&
-		             (time(NULL) - gHideStartedAt >= 15) &&
+		             (time(NULL) - gHideStartedAt >= 60) &&
+		             (gNoInjectRefCount <= 0) &&
 		             (app_hide_live_blacklisted_count() == 0);
 		if (!stale) {
 			// Hidden on purpose (a tracked no-inject app is alive, or the hide
