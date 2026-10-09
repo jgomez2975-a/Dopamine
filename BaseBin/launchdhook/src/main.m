@@ -223,7 +223,6 @@ __attribute__((constructor)) static void initializer(void)
 		// No need to keep this around
 		unsetenv("DOPAMINE_IS_HIDDEN");
 	}
-	}
 
 	// This will ensure launchdhook is always reinjected after userspace reboots
 	// As this launchd will pass environ to the next launchd...
