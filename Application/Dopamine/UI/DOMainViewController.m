@@ -272,12 +272,11 @@
         // hide half ran first - the hide is what unregisters the bundles (so the
         // following uicache -a has to rebuild the icon cache for real) and what unmounts
         // the fakelib overlay that the unhide then re-mounts.
-        [environmentManager setJailbreakHidden:YES];
-        [environmentManager setJailbreakHidden:NO];
+        [environmentManager repairJailbreakVisibility];
 
         dispatch_async(dispatch_get_main_queue(), ^{
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Jailbreak visibility"
-                                                                          message:@"Hide then unhide finished - the store and the tweak pages were rebuilt."
+                                                                          message:@"Jailbreak visibility repaired - the store icon and the tweak pages were rebuilt."
                                                                    preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:alert animated:YES completion:nil];
