@@ -69,6 +69,13 @@ bool app_hide_restore_after_userspace_reboot(void);
 // repairs it within ~10 seconds. Must be called once from launchd.
 void app_hide_start_selfheal(void);
 
+// Rebuild the LaunchServices registrations / icon cache for every bundle under
+// /var/jb/Applications. Required after a basebin update: it replaces
+// /var/jb/basebin and reboots the userspace, the bundles survive but their
+// registrations do not, so the jailbreak store loses its icon. Also undoes the
+// "uicache -u" that hiding the jailbreak runs on every bundle.
+void app_hide_schedule_uicache(void);
+
 // Cheap fast path called from the spawn hook on every process spawn: a single
 // bool read normally, and a repair only if a hide's restore was missed.
 void app_hide_maybe_heal(void);
