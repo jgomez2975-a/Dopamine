@@ -233,6 +233,13 @@
 {
     [super viewWillAppear:animated];
     [self.jailbreakBtn.button setTitle:[self jailbreakButtonTitle] forState:UIControlStateNormal];
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+    // viewDidAppear, not viewWillAppear: the repair presents its alert, and one presented
+    // while this controller is still appearing does not show up.
     [self repairVisibilityAfterEnvironmentUpdateIfNeeded];
 }
 
@@ -262,65 +269,92 @@
     // give up and the Hide Jailbreak switch had to be cycled by hand. The repair itself
     // checks for .safe_mode_user, so a real hide request is still respected.
 
+    DOEnvironmentManager *environmentManager = [DOEnvironmentManager sharedManager];
+
+    // Nothing is gated any more, and that is deliberate. Four builds in a row produced no
+    // alert on the device, and every gate that could have explained it has been removed one
+    // at a time - isJailbroken (cached once per launch, and reported NO for a hidden
+    // jailbreak), the boot token, the safe-mode marker. What is left to test is the repair
+    // itself, and the only way to tell a blocking gate apart from an ineffective repair is
+    // to show the state and run it. So report every value the repair depends on and offer
+    // to run it: this build answers the question either way.
     static BOOL didRunThisLaunch = NO;
     if (didRunThisLaunch) return;
     didRunThisLaunch = YES;
 
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
-        // systemUptime gives the current boot session even though this process was
-        // started long after it, so one stamp per boot is enough to run exactly once.
-        // Read the stamp the basebin wrote on this boot. systemUptime was tried first and is
-        // useless here: a userspace reboot restarts launchd but not the kernel, so the
-        // uptime never changes and the repair ran exactly once and never again - which is
-        // why the store icon came back the first time and then stayed gone.
-        // A hidden jailbreak bypasses the boot-session gate entirely. It is either a
-        // deliberate hide - the repair checks for that marker itself and returns without
-        // touching anything - or the stuck state that removes the store icon and every
-        // tweak pane from Settings. That stuck state is also what makes this gate wrong:
-        // it does not need a userspace reboot to appear (a per-app hide whose restore was
-        // missed produces it), and the basebin update that would have caused a reboot is
-        // correctly skipped when the bundled basebin did not change, because
-        // environmentUpdateAvailable compares a fingerprint of basebin.tar. Gating on the
-        // boot token therefore meant the repair never ran in exactly the case it exists
-        // for, which is why the Hide Jailbreak switch still had to be cycled by hand.
-        if (![environmentManager isJailbreakHidden]) {
-            NSString *bootToken = [NSString stringWithContentsOfFile:@"/var/mobile/.DopamineBootToken"
-                                                            encoding:NSUTF8StringEncoding
-                                                               error:nil];
-            if (bootToken.length == 0) return;
-            NSString *stampPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/last_repaired_boot"];
-            NSString *lastStamp = [NSString stringWithContentsOfFile:stampPath encoding:NSUTF8StringEncoding error:nil];
-            if ([bootToken isEqualToString:lastStamp]) return;
-            [bootToken writeToFile:stampPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        }
+    NSString *jbRoot = [NSString stringWithUTF8String:JBROOT_PATH("/")];
+    BOOL rootIntact = [environmentManager jailbreakRootIntact];
+    BOOL hidden = [environmentManager isJailbreakHidden];
+    BOOL jailbroken = [environmentManager isJailbroken];
+    BOOL userMark = [[NSFileManager defaultManager] fileExistsAtPath:JBROOT_PATH(@"/basebin/.safe_mode_user")];
+    BOOL varJb = [[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"];
+    BOOL storeBundle = [[NSFileManager defaultManager] fileExistsAtPath:
+        [NSString stringWithFormat:@"%@/Applications/Sileo.app", jbRoot]];
+    NSString *bootToken = [NSString stringWithContentsOfFile:@"/var/mobile/.DopamineBootToken"
+                                                    encoding:NSUTF8StringEncoding
+                                                       error:nil];
+    NSString *stampPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/last_repaired_boot"];
+    NSString *stamp = [NSString stringWithContentsOfFile:stampPath encoding:NSUTF8StringEncoding error:nil];
 
-        // Re-run the manual route verbatim: hide, then unhide. Every attempt that only
-        // reproduced the unhide half failed, because that half is a no-op unless the
-        // hide half ran first - the hide is what unregisters the bundles (so the
-        // following uicache -a has to rebuild the icon cache for real) and what unmounts
-        // the fakelib overlay that the unhide then re-mounts.
-        // Show this before touching anything. If the device reboots without this alert
-        // ever appearing, the reboot is not coming from the repair.
-        dispatch_async(dispatch_get_main_queue(), ^{
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Repair step 1 of 2"
-                                                                          message:@"About to run the repair. Dismiss this and wait. If the device reboots before you ever see this alert, the reboot is not from the repair."
-                                                                   preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:alert animated:YES completion:nil];
-        });
+    NSString *diag = [NSString stringWithFormat:
+        @"rootIntact=%d hidden=%d jailbroken=%d\nuserMark=%d varjb=%d storeBundle=%d\nbootToken=%@\nstamp=%@\njbroot=%@",
+        rootIntact, hidden, jailbroken, userMark, varJb, storeBundle,
+        bootToken.length ? [bootToken substringToIndex:MIN((NSUInteger)12, bootToken.length)] : @"(none)",
+        stamp.length ? [stamp substringToIndex:MIN((NSUInteger)12, stamp.length)] : @"(none)",
+        jbRoot];
+    [diag writeToFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/repair_diag.txt"]
+           atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
-        [NSThread sleepForTimeInterval:6.0];
-        [environmentManager repairJailbreakVisibility];
+    [self presentRepairAlertWithTitle:@"Repair diag" message:diag configure:^(UIAlertController *alert, UIWindow *window) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"Run repair" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            window.hidden = YES;
+            [self presentRepairAlertWithTitle:@"Repair" message:@"Running the hide/unhide repair. Wait about ten seconds, then check the store." configure:nil];
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+                [environmentManager repairJailbreakVisibility];
+                [bootToken writeToFile:stampPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self presentRepairAlertWithTitle:@"Repair finished" message:@"Done. Check the store and the Settings panes now." configure:nil];
+                });
+            });
+        }]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Close" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+            window.hidden = YES;
+        }]];
+    }];
+}
 
-        dispatch_async(dispatch_get_main_queue(), ^{
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Repair step 2 of 2"
-                                                                          message:@"Repair finished."
-                                                                   preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-            [self.presentedViewController dismissViewControllerAnimated:NO completion:nil];
-            [self presentViewController:alert animated:YES completion:nil];
-        });
-    });
+// Present through a window of our own, at alert level. Presenting from this controller did
+// not work in the field: the controller may already be presenting something, and in that
+// case presentViewController: returns without showing anything at all - which looks exactly
+// like the repair never having run.
+- (void)presentRepairAlertWithTitle:(NSString *)title message:(NSString *)message configure:(void (^)(UIAlertController *alert, UIWindow *window))configure
+{
+    // Retained here because an alert presented on a window that gets deallocated
+    // disappears with it. The array is function-local so it needs no file-scope
+    // declaration ahead of this method.
+    static NSMutableArray *gRepairAlertWindows = nil;
+    if (!gRepairAlertWindows) {
+        gRepairAlertWindows = [NSMutableArray array];
+    }
+    while (gRepairAlertWindows.count >= 8) {
+        [gRepairAlertWindows removeObjectAtIndex:0];
+    }
+
+    UIWindow *window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+    window.windowLevel = UIWindowLevelAlert + 1;
+    UIViewController *host = [[UIViewController alloc] init];
+    host.view.backgroundColor = [UIColor clearColor];
+    window.rootViewController = host;
+    [gRepairAlertWindows addObject:window];
+    [window makeKeyAndVisible];
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                  message:message
+                                                           preferredStyle:UIAlertControllerStyleAlert];
+    if (configure) {
+        configure(alert, window);
+    }
+    [host presentViewController:alert animated:YES completion:nil];
 }
 - (void)startJailbreak
 {
