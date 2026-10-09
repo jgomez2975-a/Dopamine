@@ -480,6 +480,43 @@ extern char **environ;
     }];
 }
 
+// Applying a new basebin swaps /var/jb/basebin and reboots the userspace. The files
+// under /var/jb/Applications survive, but their LaunchServices registrations do not,
+// and a process that was already running never gains systemhook injection later - so
+// the store and every tweak pane stayed missing until the Hide Jailbreak switch was
+// cycled by hand, whose unhide path does exactly this. Run the same recovery once,
+// on the first launch after the update that needed it.
+- (void)repairJailbreakVisibilityAfterUpdate
+{
+    void (^repair)(void) = ^{
+        jbclient_platform_set_systemwide_domain_enabled(true);
+        jbclient_platform_set_crashreporter_enabled(true);
+        [[NSFileManager defaultManager] removeItemAtPath:@"/var/mobile/.DopamineCrashReporterDisabled" error:nil];
+
+        if (![[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"]) {
+            [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb"
+                                                 withDestinationPath:JBROOT_PATH(@"/")
+                                                               error:nil];
+        }
+
+        [self setForkfixEnabled:YES];
+        [self setFakelibMounted:YES];
+        [self setPrivatePrebootProtected:YES];
+        [self restoreHiddenItems];
+        [self refreshJailbreakApps];
+
+        // Settings.app may have been running while the jailbreak was hidden, in which
+        // case it has no tweak loader and keeps showing an empty Settings until it is
+        // relaunched.
+        [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
+    };
+
+    if ([self isJailbroken]) {
+        [self runAsRoot:^{
+            [self runUnsandboxed:repair];
+        }];
+    }
+}
 - (void)unregisterJailbreakApps
 {
     [self runAsRoot:^{
