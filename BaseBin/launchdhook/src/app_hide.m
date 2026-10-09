@@ -514,6 +514,7 @@ static bool app_hide_repair_half_hidden(void)
 	// app_hide_run_jbctl("devmode_oidswap", "off");
 	app_hide_run_jbctl("audit", "restore");
 	app_hide_run_jbctl("fakelib", "mount");
+	app_hide_schedule_uicache();
 	gHideInFlight = false;
 	gHideStartedAt = 0;
 	return true;
