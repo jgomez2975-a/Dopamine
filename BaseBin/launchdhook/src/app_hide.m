@@ -841,9 +841,9 @@ void app_hide_check_role_after_spawn(pid_t pid)
 	// (user returns to the home screen or opens another app) the jailbreak stayed
 	// hidden, so Sileo would not open and Settings showed no tweak entries until
 	// the app was force-quit. First check at 500ms, then every 2s.
-	dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
 	// Counts consecutive polls that did not read as foreground.
 	__block int notForegroundPolls = 0;
+	dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
 		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
 	dispatch_source_set_timer(timer,
 		dispatch_time(DISPATCH_TIME_NOW, 500ull * NSEC_PER_MSEC),
