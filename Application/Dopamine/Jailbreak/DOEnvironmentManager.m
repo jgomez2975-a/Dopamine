@@ -274,6 +274,14 @@ extern char **environ;
     return _isJailbroken;
 }
 
+// The real jailbreak root keeps resolving even while /var/jb is unlinked, because it lives
+// under /private/preboot. That makes this the one test that is still true in the broken
+// hidden state - see the header note on why isJailbroken cannot be used there.
+- (BOOL)jailbreakRootIntact
+{
+    return [[NSFileManager defaultManager] fileExistsAtPath:JBROOT_PATH(@"/basebin/.version")];
+}
+
 - (void)setJailbroken:(BOOL)jailbroken withVersion:(NSString *)version
 {
     _isJailbroken = jailbroken;
