@@ -105,7 +105,16 @@ dyldhook: basebin.tc
 
 basebin.tar: basebin.tc dyldhook
 	@find ./.build -name ".DS_Store" -delete
-	@DYLD_FALLBACK_LIBRARY_PATH="." ./tar --transform "s/^.build/basebin/" -cvf "basebin.tar" ".build" --owner=0 --group=0
+	@# Reproducible archive. tar records each entry's mtime, so a plain -cvf produced a
+	@# different basebin.tar on every build even when not a single byte of the basebin
+	@# changed. Dopamine fingerprints that archive (FNV-1a over the tar, DOUIManager
+	@# bundledBasebinToken) to decide whether the staged basebin is current, so every
+	@# rebuild looked like a basebin update: the app staged it and rebooted the userspace
+	@# again, on the first launch after each install, for no reason. That extra reboot is
+	@# also what loses the LaunchServices registrations and with them the store icon and the
+	@# Settings tweak panes. Pinning mtime and sorting the entry order makes the archive a
+	@# pure function of its contents, so the token only moves when the basebin really does.
+	@DYLD_FALLBACK_LIBRARY_PATH="." ./tar --transform "s/^.build/basebin/" -cvf "basebin.tar" ".build" --owner=0 --group=0 --mtime="2020-01-01 00:00:00 UTC" --sort=name
 
 clean:
 	@$(MAKE) -C ChOma $@
