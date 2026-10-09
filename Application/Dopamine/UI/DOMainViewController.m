@@ -251,7 +251,11 @@
 {
     DOEnvironmentManager *environmentManager = [DOEnvironmentManager sharedManager];
     if (![environmentManager isJailbroken]) return;
-    if ([environmentManager isJailbreakHidden]) return;
+    // Do NOT bail out just because the jailbreak reads as hidden. A stuck hidden state is
+    // exactly what removes the store icon and every tweak pane from Settings, and it reads
+    // as hidden precisely the same way a deliberate hide does - which is why this used to
+    // give up and the Hide Jailbreak switch had to be cycled by hand. The repair itself
+    // checks for .safe_mode_user, so a real hide request is still respected.
 
     static BOOL didRunThisLaunch = NO;
     if (didRunThisLaunch) return;
