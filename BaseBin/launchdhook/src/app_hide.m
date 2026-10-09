@@ -468,9 +468,14 @@ static bool app_hide_repair_half_hidden(void)
 	NSString *versionPath = [jbRootStr stringByAppendingPathComponent:@"basebin/.version"];
 	if (![[NSFileManager defaultManager] fileExistsAtPath:versionPath]) return false;
 
-	// Manual "Hide Jailbreak" is on -> leave it alone.
+	// Manual "Hide Jailbreak" is on -> leave it alone. A .safe_mode the user did not
+	// ask for (watchdog panic recovery, or a leftover from an older build) must NOT
+	// block the repair: blocking on it is what left /var/jb gone, Sileo unable to
+	// launch and no visible tweak settings until the hide switch was cycled by hand.
+	NSFileManager *repairFileManager = [NSFileManager defaultManager];
 	NSString *safeModePath = [jbRootStr stringByAppendingPathComponent:@"basebin/.safe_mode"];
-	if ([[NSFileManager defaultManager] fileExistsAtPath:safeModePath]) return false;
+	NSString *userSafeModePath = [jbRootStr stringByAppendingPathComponent:@"basebin/.safe_mode_user"];
+	if ([repairFileManager fileExistsAtPath:safeModePath] && [repairFileManager fileExistsAtPath:userSafeModePath]) return false;
 
 	// Stale-hide detection -- the fix for "I have to tap Hide Jailbreak every so
 	// often". app_hide_is_currently_hidden() is pure bookkeeping: when a
