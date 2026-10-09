@@ -10,6 +10,8 @@
 #import <pthread.h>
 #import <sys/sysctl.h>
 #import <substrate.h>
+#include <stdio.h>
+#include <time.h>
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <kern_memorystatus.h>
@@ -175,6 +177,16 @@ __attribute__((constructor)) static void initializer(void)
 	// the Hide Jailbreak switch by hand. This used to live only inside the
 	// DOPAMINE_IS_HIDDEN branch below, which never runs for a basebin update
 	// (the jailbreak is visible at that point), so it never actually fired.
+	// A userspace reboot restarts launchd but not the kernel, so NSProcessInfo.systemUptime
+	// does not change across one and the app cannot tell boot sessions apart by itself.
+	// Stamp every boot here - userspace reboots included - so it can.
+	{
+		FILE *bootTokenFile = fopen("/var/mobile/.DopamineBootToken", "w");
+		if (bootTokenFile != NULL) {
+			fprintf(bootTokenFile, "%ld", (long)time(NULL));
+			fclose(bootTokenFile);
+		}
+	}
 	app_hide_schedule_uicache();
 
 	// A .safe_mode on its own is never a user decision: the watchdog writes it when
