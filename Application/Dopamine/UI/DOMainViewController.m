@@ -266,10 +266,11 @@
         [environmentManager repairJailbreakVisibility];
 
         NSString *report = [NSString stringWithFormat:
-            @"store apps unregistered: %@\nstray safe_mode: %@\nafter basebin update: %@\nrepair: done (incl. devmode_oidswap off)",
+            @"store apps unregistered: %@\nstray safe_mode: %@\nafter basebin update: %@\nrepair: done (incl. devmode_oidswap off)\n\n--- raw state ---\n%@",
             unregistered ? @"YES" : @"no",
             straySafeMode ? @"YES" : @"no",
-            afterUpdate ? @"YES" : @"no"];
+            afterUpdate ? @"YES" : @"no",
+            [environmentManager jailbreakVisibilityDiagnostics]];
 
         dispatch_async(dispatch_get_main_queue(), ^{
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Visibility repair"
