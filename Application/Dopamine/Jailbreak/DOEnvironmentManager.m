@@ -512,6 +512,50 @@ extern char **environ;
 // watchdog leaves behind after a userspace panic. While it exists systemhook skips
 // tweak loading in every process it spawns, which is what empties the tweak pages in
 // Settings.
+- (NSString *)jailbreakVisibilityDiagnostics
+{
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *appsPath = JBROOT_PATH(@"/Applications");
+    NSString *basePath = JBROOT_PATH(@"/basebin");
+
+    NSArray *bundles = [fm contentsOfDirectoryAtPath:appsPath error:nil];
+
+    NSString *sileoPath = [appsPath stringByAppendingPathComponent:@"Sileo.app"];
+    NSDictionary *sileoInfo = [NSDictionary dictionaryWithContentsOfFile:
+        [sileoPath stringByAppendingPathComponent:@"Info.plist"]];
+    NSString *sileoID = sileoInfo[@"CFBundleIdentifier"];
+
+    NSString *proxyState = @"(skipped)";
+    Class proxyClass = NSClassFromString(@"LSApplicationProxy");
+    if (proxyClass && sileoID.length) {
+        id proxy = [proxyClass performSelector:@selector(applicationProxyForIdentifier:) withObject:sileoID];
+        proxyState = proxy ? @"YES" : @"no";
+    }
+
+    NSArray *quarantineMap = [NSArray arrayWithContentsOfFile:@"/var/mobile/.DopamineHideQuarantine/map.plist"];
+
+    return [NSString stringWithFormat:
+        @"JBROOT_PATH(/Applications):\n  %@\n"
+         "apps entries: %lu\n"
+         "/var/jb: %@\n"
+         "Sileo.app: %@\n"
+         "Sileo id: %@\n"
+         "LS proxy: %@\n"
+         ".safe_mode: %@\n"
+         ".safe_mode_user: %@\n"
+         ".safe_mode_inject_off: %@\n"
+         "quarantine map: %lu",
+        appsPath,
+        (unsigned long)bundles.count,
+        [fm fileExistsAtPath:@"/var/jb"] ? @"YES" : @"no",
+        [fm fileExistsAtPath:sileoPath] ? @"YES" : @"no",
+        sileoID ?: @"(none)",
+        proxyState,
+        [fm fileExistsAtPath:[basePath stringByAppendingPathComponent:@".safe_mode"]] ? @"exists" : @"no",
+        [fm fileExistsAtPath:[basePath stringByAppendingPathComponent:@".safe_mode_user"]] ? @"exists" : @"no",
+        [fm fileExistsAtPath:[basePath stringByAppendingPathComponent:@".safe_mode_inject_off"]] ? @"exists" : @"no",
+        (unsigned long)quarantineMap.count];
+}
 - (BOOL)hasStraySafeMode
 {
     NSString *base = JBROOT_PATH(@"/basebin");
