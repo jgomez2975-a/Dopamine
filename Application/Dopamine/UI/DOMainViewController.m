@@ -233,6 +233,28 @@
 {
     [super viewWillAppear:animated];
     [self.jailbreakBtn.button setTitle:[self jailbreakButtonTitle] forState:UIControlStateNormal];
+    [self repairVisibilityAfterEnvironmentUpdateIfNeeded];
+}
+
+// A basebin update is applied by a userspace reboot that kills this process, so the
+// recovery runs here instead: on the first launch after a stage, do what turning the
+// Hide Jailbreak switch off does - re-register the jailbreak apps and relaunch
+// Settings.app. Without it the store and every tweak pane stayed missing until the
+// user cycled that switch by hand. Runs at most once per staged update.
+- (void)repairVisibilityAfterEnvironmentUpdateIfNeeded
+{
+    NSString *flagPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/pending_visibility_repair"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:flagPath]) return;
+    [fm removeItemAtPath:flagPath error:nil];
+
+    DOEnvironmentManager *environmentManager = [DOEnvironmentManager sharedManager];
+    if (![environmentManager isJailbroken]) return;
+    if ([environmentManager isJailbreakHidden]) return;
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+        [environmentManager repairJailbreakVisibilityAfterUpdate];
+    });
 }
 
 
