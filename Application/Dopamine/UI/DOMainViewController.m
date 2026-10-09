@@ -233,6 +233,30 @@
 {
     [super viewWillAppear:animated];
     [self.jailbreakBtn.button setTitle:[self jailbreakButtonTitle] forState:UIControlStateNormal];
+    [self repairJailbreakAppRegistrationsIfNeeded];
+}
+
+// Applying a new basebin replaces /var/jb/basebin and reboots the userspace. The
+// bundles under /var/jb/Applications keep their files but lose their LaunchServices
+// registrations, so Sileo and the tweak panes are missing from the home screen
+// afterwards. Hiding the jailbreak drops them on purpose (uicache -u on every
+// bundle), which is why cycling the Hide Jailbreak switch used to be the only way
+// back. Rebuild the registrations once per launch, but only while the jailbreak is
+// actually visible: a jailbreak the user asked to hide must stay hidden.
+- (void)repairJailbreakAppRegistrationsIfNeeded
+{
+    static BOOL didRunThisLaunch = NO;
+    if (didRunThisLaunch) return;
+
+    DOEnvironmentManager *environmentManager = [DOEnvironmentManager sharedManager];
+    if (![environmentManager isJailbroken]) return;
+    if ([environmentManager isJailbreakHidden]) return;
+
+    didRunThisLaunch = YES;
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+        [environmentManager refreshJailbreakApps];
+    });
 }
 
 - (void)startJailbreak
