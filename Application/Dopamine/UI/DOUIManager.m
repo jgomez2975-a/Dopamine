@@ -103,6 +103,17 @@
                                      encoding:NSUTF8StringEncoding
                                         error:nil];
 }
+
+- (NSString *)lastStageAttemptPath
+{
+    return [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/last_stage_attempt"];
+}
+
+- (NSDate *)lastStageAttemptDate
+{
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:[self lastStageAttemptPath] error:nil];
+    return attrs[NSFileModificationDate];
+}
 - (BOOL)environmentUpdateAvailable
 {
     if (![[DOEnvironmentManager sharedManager] jailbrokenVersion])
@@ -123,7 +134,18 @@
     // exactly ONCE per distinct basebin build and then stays quiet.
     NSString *token = [self bundledBasebinToken];
     if (!token) return NO;
-    return ![token isEqualToString:[self stagedBasebinToken]];
+    if ([token isEqualToString:[self stagedBasebinToken]]) return NO;
+
+    // Safety net: applying a staged basebin ends in a userspace reboot. If the
+    // token ever fails to stick, this check would otherwise stage and reboot on
+    // every single launch, so never start a second attempt shortly after the last.
+    NSDate *lastAttempt = [self lastStageAttemptDate];
+    if (lastAttempt) {
+        NSTimeInterval elapsed = -[lastAttempt timeIntervalSinceNow];
+        if (elapsed >= 0 && elapsed < 600) return NO;
+    }
+
+    return YES;
 }
 
 // FNV-1a over the bundled basebin.tar: identifies a basebin build without
@@ -152,6 +174,9 @@
                 atomically:YES
                   encoding:NSUTF8StringEncoding
                      error:nil];
+        [[NSFileManager defaultManager] createFileAtPath:[self lastStageAttemptPath]
+                                                contents:[NSData data]
+                                              attributes:nil];
     }
 }
 
