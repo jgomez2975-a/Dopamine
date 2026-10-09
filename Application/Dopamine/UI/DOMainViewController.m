@@ -250,8 +250,16 @@
 - (void)repairVisibilityAfterEnvironmentUpdateIfNeeded
 {
     DOEnvironmentManager *environmentManager = [DOEnvironmentManager sharedManager];
-    if (![environmentManager isJailbroken]) return;
-    if ([environmentManager isJailbreakHidden]) return;
+    // Neither of these may be tested here, and both used to be.
+    //
+    // isJailbroken resolves through jbclient_dopamine_is_jailbroken, which is evaluated once
+    // per app launch and reports NO for a hidden jailbreak - so it is false in exactly the
+    // state this repair exists for. isJailbreakHidden simply reports that /var/jb is absent,
+    // which a stuck hidden state produces the same way a deliberate one does. Between them
+    // the repair returned before doing anything, every single time, which is why the Hide
+    // Jailbreak switch had to be cycled by hand to get the store back. The repair itself
+    // respects a real hide: it returns immediately when .safe_mode_user is present, and only
+    // setJailbreakHidden:YES writes that marker.
 
     static BOOL didRunThisLaunch = NO;
     if (didRunThisLaunch) return;
