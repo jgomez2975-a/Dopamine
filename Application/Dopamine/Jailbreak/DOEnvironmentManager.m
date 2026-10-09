@@ -1376,6 +1376,11 @@ extern char **environ;
 
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
                     [[NSData data] writeToFile:safeModePath atomically:YES];
+                    // This hide is user-initiated: mark it so main.m keeps it across a
+                    // userspace reboot. Without the marker an automatic safe mode
+                    // (watchdog panic recovery) is treated the same way, which used
+                    // to leave /var/jb gone and Sileo unable to launch.
+                    [[NSData data] writeToFile:JBROOT_PATH(@"/basebin/.safe_mode_user") atomically:YES];
 
                     [self unregisterJailbreakApps];
                     [self setPrivatePrebootProtected:NO];
