@@ -67,6 +67,11 @@ NS_ASSUME_NONNULL_BEGIN
 // switch used to be the only way out of.
 - (BOOL)jailbreakAppsUnregistered;
 - (BOOL)hasStraySafeMode;
+
+// Raw state dump, used while diagnosing: it shows the path JBROOT_PATH actually
+// resolved to, which is the difference between a probe that works and one that has
+// been quietly looking at the system /Applications all along.
+- (NSString *)jailbreakVisibilityDiagnostics;
 - (void)reboot;
 - (void)changeMobilePassword:(NSString *)newPassword;
 - (NSError*)updateEnvironment;
