@@ -502,19 +502,14 @@ static bool app_hide_repair_half_hidden(void)
 	// the manual toggle. If the flag is set but not one tracked no-inject app is
 	// still alive, the hide is stale: clear it and carry on to the repair below.
 	if (app_hide_is_currently_hidden()) {
-		// gNoInjectRefCount is the authoritative signal. app_hide_global_hide raises it
-		// and only app_hide_global_restore lowers it, which happens once the LAST hidden
-		// app exits, so a non-zero refcount means a hide is meant to be in force right
-		// now. Judging staleness from the tracked pid list alone undid real hides: that
-		// list can read empty while the hidden app is still running (pidversion churn, a
-		// launch that starts in the background and is promoted, a pid that was never
-		// committed), and the repair below then relinked /var/jb - so the app detected
-		// the jailbreak again a few seconds after it had been hidden, which is the
-		// "Hide for App does not stick" failure. The grace period is widened as well so
-		// a slow launch cannot be mistaken for a missed restore either.
+		// Staleness is judged from the tracked pid list. The refcount must NOT be part
+		// of this test: it is only lowered by app_hide_global_restore, so if a restore
+		// is ever missed it stays above zero forever and a refcount-gated test could
+		// never clear it - which left /var/jb removed, the store gone and no way back
+		// except cycling the Hide Jailbreak switch. Clearing a stale hide resets the
+		// refcount together with the flag, so recovery still works.
 		bool stale = (gHideStartedAt != 0) &&
-		             (time(NULL) - gHideStartedAt >= 60) &&
-		             (gNoInjectRefCount <= 0) &&
+		             (time(NULL) - gHideStartedAt >= 15) &&
 		             (app_hide_live_blacklisted_count() == 0);
 		if (!stale) {
 			// Hidden on purpose (a tracked no-inject app is alive, or the hide
@@ -847,6 +842,8 @@ void app_hide_check_role_after_spawn(pid_t pid)
 	// hidden, so Sileo would not open and Settings showed no tweak entries until
 	// the app was force-quit. First check at 500ms, then every 2s.
 	dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+	// Counts consecutive polls that did not read as foreground.
+	__block int notForegroundPolls = 0;
 		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
 	dispatch_source_set_timer(timer,
 		dispatch_time(DISPATCH_TIME_NOW, 500ull * NSEC_PER_MSEC),
@@ -859,19 +856,35 @@ void app_hide_check_role_after_spawn(pid_t pid)
 		}
 
 		int appState = app_hide_get_app_state(pid);
+		app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d", pid, appState]);
 		// Unknown: keep hiding. Being conservative here only risks staying hidden
-		// (which the self-heal can repair), while restoring by mistake would
-		// expose the jailbreak to the app we are hiding it from.
+		// (which the self-heal can repair), while restoring by mistake would expose
+		// the jailbreak to the app we are hiding it from.
 		if (appState < 0) return;
 
-		app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d", pid, appState]);
-		// 1 = PROC_APPSTATE_ACTIVE (foreground). Anything else means the app is no
-		// longer frontmost -> restore the jailbreak.
-		if (appState != 1) {
-			app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d no longer foreground, restoring jailbreak", pid]);
-			app_hide_global_restore();
-			dispatch_source_cancel(timer);
+		// 1 = PROC_APPSTATE_ACTIVE (foreground).
+		if (appState == 1) {
+			notForegroundPolls = 0;
+			return;
 		}
+
+		// One non-active reading is NOT a backgrounding. An app that is still on
+		// screen reads as something other than ACTIVE during its launch, while a
+		// system alert covers it, and during any transition - and restoring on the
+		// first such reading brought the jailbreak back within a second or two of the
+		// app opening, so the app detected it again. That is the "Hide for App does
+		// not work" failure: the hide was real, it was simply undone immediately.
+		// Only a state that stays non-foreground across several polls is a real
+		// backgrounding; that still releases the hide, a few seconds later.
+		notForegroundPolls++;
+		if (notForegroundPolls < 3) {
+			app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d (poll %d), keeping hide", pid, appState, notForegroundPolls]);
+			return;
+		}
+
+		app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d not foreground for %d polls, restoring jailbreak", pid, notForegroundPolls]);
+		app_hide_global_restore();
+		dispatch_source_cancel(timer);
 	});
 	dispatch_resume(timer);
 }
