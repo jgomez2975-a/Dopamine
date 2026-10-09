@@ -446,6 +446,7 @@ bool app_hide_restore_after_userspace_reboot(void)
 	// per-app path never touches dev-mode (see app_hide_do_hide)
 	// app_hide_run_jbctl("devmode_oidswap", "off");
 	app_hide_run_jbctl("audit", "restore");
+	app_hide_schedule_uicache();
 	return true;
 }
 
