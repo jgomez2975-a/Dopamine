@@ -263,7 +263,14 @@
 
         if (!unregistered && !straySafeMode && !afterUpdate) return;
 
-        [environmentManager repairJailbreakVisibility];
+        // Lighter repairs were all tried on this device and all left the store gone:
+        // re-registering the bundles, clearing safe mode, and finally an exact mirror
+        // of setJailbreakHidden:NO including the devmode oidswap. The one thing that
+        // has never failed is the manual route, which is hide followed immediately by
+        // unhide - so drive the same two calls the switch drives, in the same order,
+        // on the same queue. The hide half is what the mirror was missing.
+        [environmentManager setJailbreakHidden:YES];
+        [environmentManager setJailbreakHidden:NO];
 
         NSString *report = [NSString stringWithFormat:
             @"store apps unregistered: %@\nstray safe_mode: %@\nafter basebin update: %@\nrepair: done (incl. devmode_oidswap off)\n\n--- raw state ---\n%@",
