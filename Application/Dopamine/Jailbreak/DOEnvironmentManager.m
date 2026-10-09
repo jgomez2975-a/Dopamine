@@ -580,24 +580,20 @@ static BOOL gSuppressDevmodeOidSwap = NO;
 {
     if (![self isJailbroken]) return;
 
-    // The store icon going missing is not a registration *loss*: while it was gone,
-    // LSApplicationProxy still resolved Sileo, so every probe read clean and there was
-    // nothing to key a decision on. What restores it is the pair the Hide Jailbreak switch
-    // runs - unregister the bundles, then let uicache -a rebuild them from scratch.
-    // Dropping the icon cache alone was never enough: it leaves the still-intact
-    // registration in place, so uicache -a finds nothing to do and the icon stays gone,
-    // which is exactly the failure this repair was written for. The cost is known and
-    // real - iOS treats the bundles as freshly installed, so their privacy grants are
-    // discarded and Sileo asks for network access again - and it is the trade for a store
-    // that comes back without cycling the switch by hand.
-    [self unregisterJailbreakApps];
-    [self refreshJailbreakApps];
-
+    // The store icon going missing is a SpringBoard icon cache problem, not a registration
+    // problem: while the icon was gone, LSApplicationProxy still resolved Sileo the whole
+    // time. Rebuilding it by unregistering the bundles worked, but uicache -u followed by
+    // uicache -a makes iOS treat those apps as freshly installed, so their privacy grants
+    // were discarded and Sileo asked for network access again after every reboot. Dropping
+    // the cache and letting uicache rebuild from the still-intact registration restores the
+    // icon without touching the app identities, so nothing else is reset.
     [self runAsRoot:^{
         [self runUnsandboxed:^{
             NSFileManager *fm = [NSFileManager defaultManager];
             [fm removeItemAtPath:@"/var/mobile/Library/Caches/com.apple.IconsCache" error:nil];
             [fm removeItemAtPath:@"/var/mobile/Library/Caches/com.apple.IconsCache.plist" error:nil];
+
+            [self refreshJailbreakApps];
 
             // Settings is cleared once so it cannot be the process that survives across the
             // rebuild holding an un-injected state.
