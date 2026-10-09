@@ -578,19 +578,26 @@ extern char **environ;
 static BOOL gSuppressDevmodeOidSwap = NO;
 - (void)repairJailbreakVisibility
 {
-    // The delayed kill loop that used to live here is gone. Repeatedly terminating
-    // Settings is what changed between the build that survived a userspace reboot and the
-    // two that rebooted on the next launch of this app, and terminateRunningAppWithBundleID:
-    // walks the whole process table, so a bad match there is a plausible way to take the
-    // device down with it. One kill before the cycle is enough to stop Settings from being
-    // the process that survives across the broken window, and setJailbreakHidden: itself
-    // already kills it once more when the cycle finishes.
-    [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
+    // Only what rebuilding the store icon actually needs. The full hide/unhide cycle that
+    // used to run here also unlinked /var/jb, ran the library audit and unmounted the
+    // fakelib, and doing that on every boot both piled up quarantined files and produced a
+    // SpringBoard respring storm that hung the device after a few userspace reboots. The
+    // tweak panes no longer need anything from this path, so it stays light.
+    if (![self isJailbroken]) return;
 
-    gSuppressDevmodeOidSwap = YES;
-    [self setJailbreakHidden:YES];
-    gSuppressDevmodeOidSwap = NO;
-    [self setJailbreakHidden:NO];
+    [self runAsRoot:^{
+        [self runUnsandboxed:^{
+            // Unregistering first is the whole trick: uicache -a on its own decides the
+            // cache is already consistent and does nothing, while an unregister forces the
+            // rebuild that puts the store icon back.
+            [self unregisterJailbreakApps];
+            [self refreshJailbreakApps];
+
+            // Settings is cleared once so it cannot be the process that survives across the
+            // rebuild holding an un-injected state.
+            [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
+        }];
+    }];
 }
 - (void)unregisterJailbreakApps
 {
