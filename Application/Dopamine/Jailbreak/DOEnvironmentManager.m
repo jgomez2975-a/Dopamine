@@ -578,19 +578,21 @@ extern char **environ;
 static BOOL gSuppressDevmodeOidSwap = NO;
 - (void)repairJailbreakVisibility
 {
-    // Only what rebuilding the store icon actually needs. The full hide/unhide cycle that
-    // used to run here also unlinked /var/jb, ran the library audit and unmounted the
-    // fakelib, and doing that on every boot both piled up quarantined files and produced a
-    // SpringBoard respring storm that hung the device after a few userspace reboots. The
-    // tweak panes no longer need anything from this path, so it stays light.
     if (![self isJailbroken]) return;
 
+    // The store icon going missing is a SpringBoard icon cache problem, not a registration
+    // problem: while the icon was gone, LSApplicationProxy still resolved Sileo the whole
+    // time. Rebuilding it by unregistering the bundles worked, but uicache -u followed by
+    // uicache -a makes iOS treat those apps as freshly installed, so their privacy grants
+    // were discarded and Sileo asked for network access again after every reboot. Dropping
+    // the cache and letting uicache rebuild from the still-intact registration restores the
+    // icon without touching the app identities, so nothing else is reset.
     [self runAsRoot:^{
         [self runUnsandboxed:^{
-            // Unregistering first is the whole trick: uicache -a on its own decides the
-            // cache is already consistent and does nothing, while an unregister forces the
-            // rebuild that puts the store icon back.
-            [self unregisterJailbreakApps];
+            NSFileManager *fm = [NSFileManager defaultManager];
+            [fm removeItemAtPath:@"/var/mobile/Library/Caches/com.apple.IconsCache" error:nil];
+            [fm removeItemAtPath:@"/var/mobile/Library/Caches/com.apple.IconsCache.plist" error:nil];
+
             [self refreshJailbreakApps];
 
             // Settings is cleared once so it cannot be the process that survives across the
