@@ -81,7 +81,7 @@ static NSDictionary *DOCollectEnvironmentDiagnostics(NSString *root)
     NSArray *relative = @[@"basebin/.safe_mode", @"basebin/.version", @"basebin/launchdhook.dylib",
         @"basebin/systemhook.dylib", @"basebin/jbctl", @"basebin/forkfix.dylib",
         @"usr/lib/ellekit", @"usr/lib/ellekit/libellekit.dylib", @"usr/lib/libellekit.dylib",
-        @"usr/lib/TweakLoader.dylib", @"Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate",
+        @"usr/lib/TweakLoader.dylib", @"usr/lib/ellekit/libinjector.dylib", @"usr/lib/TweakInject", @"Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate",
         @"Library/MobileSubstrate/DynamicLibraries", @"Library/MobileSubstrate/DynamicLibraries/PreferenceLoader.dylib",
         @"Library/PreferenceBundles", @"Library/PreferenceLoader/Preferences", @"Applications/Sileo.app",
         @"Applications/Sileo.app/Sileo", @"Applications/Sileo.app/Info.plist",
