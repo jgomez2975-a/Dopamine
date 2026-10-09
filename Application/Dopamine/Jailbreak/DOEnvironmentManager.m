@@ -576,6 +576,43 @@ extern char **environ;
     void (^repair)(void) = ^{
         NSFileManager *fm = [NSFileManager defaultManager];
 
+        // ---- hide half, with two deliberate omissions from the real switch ----
+        // 1. devmode_oidswap is left out. It is not needed to rebuild an icon cache or
+        //    to re-mount the fakelib, and turning it on makes iOS report developer mode
+        //    as disabled, which is what surfaces the developer-mode alert on the next
+        //    launch of this app. The command is still issued below, but only as "off".
+        // 2. The .safe_mode markers are left out too: their only effect is to make the
+        //    basebin skip tweak injection, which nothing here depends on, and a marker
+        //    that survived a crash would leave the whole jailbreak un-injected.
+        if ([self isJailbroken]) {
+            [self setForkfixEnabled:NO];
+            [self setPrivatePrebootProtected:NO];
+
+            // This is the step every earlier repair was missing. uicache -a on its own
+            // decides the cache is already consistent and does nothing, so the store icon
+            // never came back; the switch only ever fixed it by unregistering the bundles
+            // first, which forces the following uicache -a to rebuild for real.
+            [self unregisterJailbreakApps];
+
+            // Unmounting the fakelib overlay is what makes the remount below effective.
+            [self setFakelibMounted:NO];
+        }
+        else {
+            [self setForkfixEnabled:NO];
+            [self setPrivatePrebootProtected:NO];
+            [self setFakelibMounted:NO];
+        }
+
+        [self hideJailbreakURLSchemes];
+        [fm removeItemAtPath:@"/var/jb" error:nil];
+        [self runJailbreakLibraryAudit];
+
+        if ([self isJailbroken]) {
+            jbclient_platform_set_systemwide_domain_enabled(false);
+            jbclient_platform_set_crashreporter_enabled(false);
+        }
+
+        // ---- unhide half ----
         if ([self isJailbroken]) {
             jbclient_platform_set_systemwide_domain_enabled(true);
             jbclient_platform_set_crashreporter_enabled(true);
@@ -600,22 +637,10 @@ extern char **environ;
             [self setPrivatePrebootProtected:YES];
             [self refreshJailbreakApps];
 
-            // The step this repair was missing, and the reason it reported success
-            // while nothing came back. Hiding the jailbreak swaps the oid_name
-            // pointers so security.mac.amfi.developer_mode_status reports 0; a device
-            // in that state refuses to launch ad-hoc signed binaries, which is exactly
-            // Sileo and every tweak's preference bundle. So the store stayed
-            // unlaunchable and the tweak pages stayed empty even though the
-            // LaunchServices registrations were intact and nothing was quarantined -
-            // which is why both probes read "no" and this repair still changed nothing.
-            // It is also the only reason cycling the Hide Jailbreak switch ever fixed
-            // the device: its restore branch runs precisely this command. Must run with
-            // /var/jb back in place, because jbctl lives at /var/jb/basebin/jbctl.
+            // Only ever "off". This also clears the swapped state a previous build left
+            // behind, which is what makes the developer-mode alert appear.
             [self spawnJbctlAsRootWithArgs:@[@"internal", @"devmode_oidswap", @"off"]];
 
-            // Settings.app is normally still the process that ran while the jailbreak
-            // was hidden; a process spawned without systemhook injection never gains it
-            // later, so it keeps showing an empty Settings until relaunched.
             [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
         }
     };
@@ -627,6 +652,17 @@ extern char **environ;
     }
     else {
         repair();
+    }
+
+    // Settings.app starts the instant the user taps it, and a process that starts before
+    // the fakelib overlay is back never gains tweak injection afterwards - which is why
+    // the store returned while the tweak pages stayed empty. Keep clearing the app for a
+    // while so any instance that starts during the rebuild is discarded.
+    for (NSNumber *delay in @[@5, @15, @30, @45]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)),
+                       dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            [self terminateRunningAppWithBundleID:@"com.apple.Preferences"];
+        });
     }
 }
 - (void)unregisterJailbreakApps
