@@ -29,13 +29,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (BOOL)isInstalledThroughTrollStore;
 - (BOOL)isJailbroken;
-
-// True while the real jailbreak root is present, which stays the case even when
-// /var/jb has been unlinked. isJailbroken cannot be used for that: it resolves
-// through jbclient_dopamine_is_jailbroken, is cached once per app launch, and
-// reports NO for a hidden jailbreak - so it is false in exactly the broken state
-// the launch repair handles.
-- (BOOL)jailbreakRootIntact;
 - (BOOL)isJailbrokenWithOtherJailbreak;
 - (BOOL)isBootstrapped;
 - (NSString *)jailbrokenVersion;
