@@ -277,7 +277,7 @@
 
         dispatch_async(dispatch_get_main_queue(), ^{
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Jailbreak visibility"
-                                                                          message:@"鑷姩鎵ц浜嗐€岄殣钘忚秺鐙?鈫?鍙栨秷闅愯棌銆嶏紝瓒婄嫳鍟嗗簵涓庢彃浠堕〉宸查噸寤恒€?
+                                                                          message:@"Hide then unhide finished - the store and the tweak pages were rebuilt."
                                                                    preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:alert animated:YES completion:nil];
