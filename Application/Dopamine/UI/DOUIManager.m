@@ -109,6 +109,11 @@
     return [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/last_stage_attempt"];
 }
 
+- (NSString *)pendingVisibilityRepairPath
+{
+    return [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/pending_visibility_repair"];
+}
+
 - (NSDate *)lastStageAttemptDate
 {
     NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:[self lastStageAttemptPath] error:nil];
@@ -175,6 +180,12 @@
                   encoding:NSUTF8StringEncoding
                      error:nil];
         [[NSFileManager defaultManager] createFileAtPath:[self lastStageAttemptPath]
+                                                contents:[NSData data]
+                                              attributes:nil];
+
+        // The stage is applied by a userspace reboot that kills this process, so the
+        // recovery cannot run now - leave a flag for the first launch afterwards.
+        [[NSFileManager defaultManager] createFileAtPath:[self pendingVisibilityRepairPath]
                                                 contents:[NSData data]
                                               attributes:nil];
     }
