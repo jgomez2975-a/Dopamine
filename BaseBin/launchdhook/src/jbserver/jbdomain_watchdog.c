@@ -26,6 +26,11 @@ static int watchdog_intercept_userspace_panic(const char *panicMessage)
 	setenv("WATCHDOG_PANIC_MESSAGE", panicMessage, 1);
 	FILE *touchFile = fopen(JBROOT_PATH("/basebin/.safe_mode"), "w");
 	fclose(touchFile);
+	// An intercepted userspace panic is not a hide the user asked for: main.m keeps
+	// the jailbreak hidden across a userspace reboot only when .safe_mode_user is
+	// present too. Record the automatic case explicitly.
+	FILE *autoSafeModeFile = fopen(JBROOT_PATH("/basebin/.safe_mode_auto"), "w");
+	fclose(autoSafeModeFile);
 
 	return 0;
 }
