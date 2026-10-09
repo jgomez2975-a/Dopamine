@@ -385,6 +385,27 @@ static void app_hide_do_hide(void)
 	gHideStartedAt = time(NULL);
 }
 
+// Rebuild the app registrations after /var/jb comes back.
+//
+// Hiding the jailbreak runs "uicache -u" on every bundle under /var/jb/Applications
+// (DOEnvironmentManager -unregisterJailbreakApps), which REMOVES Sileo and the
+// other jailbreak apps from the app database. Relinking /var/jb afterwards brings
+// the files back but not the registrations, so the jailbreak store stayed missing
+// from the home screen even though the jailbreak itself was healthy again.
+//
+// Retried, because the callers that matter here run during early boot, before lsd
+// and installd are ready to accept a registration.
+static void app_hide_schedule_uicache(void)
+{
+	for (int attempt = 0; attempt < 4; attempt++) {
+		int64_t delaySeconds = 5 + (int64_t)attempt * 15;
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delaySeconds * NSEC_PER_SEC),
+			dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+				exec_cmd("/var/jb/usr/bin/uicache", "-a", NULL);
+			});
+	}
+}
+
 static void app_hide_do_restore(void)
 {
 	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
