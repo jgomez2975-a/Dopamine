@@ -260,12 +260,18 @@
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
         // systemUptime gives the current boot session even though this process was
         // started long after it, so one stamp per boot is enough to run exactly once.
-        NSDate *bootDate = [NSDate dateWithTimeIntervalSinceNow:-[[NSProcessInfo processInfo] systemUptime]];
-        NSString *bootStamp = [NSString stringWithFormat:@"%.0f", [bootDate timeIntervalSince1970]];
+        // Read the stamp the basebin wrote on this boot. systemUptime was tried first and is
+        // useless here: a userspace reboot restarts launchd but not the kernel, so the
+        // uptime never changes and the repair ran exactly once and never again - which is
+        // why the store icon came back the first time and then stayed gone.
+        NSString *bootToken = [NSString stringWithContentsOfFile:@"/var/mobile/.DopamineBootToken"
+                                                        encoding:NSUTF8StringEncoding
+                                                           error:nil];
+        if (bootToken.length == 0) return;
         NSString *stampPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/last_repaired_boot"];
         NSString *lastStamp = [NSString stringWithContentsOfFile:stampPath encoding:NSUTF8StringEncoding error:nil];
-        if ([bootStamp isEqualToString:lastStamp]) return;
-        [bootStamp writeToFile:stampPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        if ([bootToken isEqualToString:lastStamp]) return;
+        [bootToken writeToFile:stampPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
         // Re-run the manual route verbatim: hide, then unhide. Every attempt that only
         // reproduced the unhide half failed, because that half is a no-op unless the
