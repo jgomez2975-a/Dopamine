@@ -43,7 +43,7 @@ int main(int argc,char **argv){@autoreleasepool{
   components[name]=hash;
  }
  NSString *manifest=[root stringByAppendingPathComponent:@"DopamineBuildIdentity.plist"];
- CHECK([@{@"schema":@1,@"commit":@"fixture",@"components":components} writeToFile:manifest atomically:YES]);
+ CHECK(([@{@"schema":@1,@"commit":@"fixture",@"components":components} writeToFile:manifest atomically:YES]));
  NSData *before=[NSData dataWithContentsOfFile:manifest];
  NSDictionary *result=DOComponentIdentity(root,root);
  CHECK([result[@"status"] isEqual:@"match"]);
