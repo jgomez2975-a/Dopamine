@@ -16,7 +16,7 @@ static uid_t testUID(void){return pretendUID;}
 #import "DOHelperTransition.h"
 #define CHECK(x) do {if(!(x)){NSLog(@"FAIL %d %s",__LINE__,#x);return 1;}count++;}while(0)
 int main(int argc,char **argv){@autoreleasepool{(void)argc;int count=0;
- NSString *dir=[NSString stringWithUTF8String:argv[1]];fixturePrefix=[dir stringByAppendingString:@"/"];
+ NSString *dir=[[NSString stringWithUTF8String:argv[1]] stringByResolvingSymlinksInPath];fixturePrefix=[dir stringByAppendingString:@"/"];
  NSString *root=[dir stringByAppendingPathComponent:@"procursus"],*entry=[dir stringByAppendingPathComponent:@"jb"];
  fixtureEntry=entry.fileSystemRepresentation;
  CHECK(mkdir(root.fileSystemRepresentation,0700)==0);CHECK(symlink(root.fileSystemRepresentation,fixtureEntry)==0);
