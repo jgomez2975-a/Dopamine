@@ -1,6 +1,7 @@
 #pragma once
 #import <Foundation/Foundation.h>
 #import "DOComponentIdentity.h"
+#import "DOHelperCrashDiagnostics.h"
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <unistd.h>
@@ -135,6 +136,7 @@ static NSDictionary *DOCollectEnvironmentDiagnostics(NSString *root)
     }
     return @{@"root": root ?: @"<unavailable>", @"euid": @(geteuid()), @"paths": paths,
         @"component_identity": DOComponentIdentity(root, NSBundle.mainBundle.bundlePath),
+        @"helper_crashes": DOCollectHelperCrashes(@[@"/var/mobile/Library/Logs/CrashReporter", @"/Library/Logs/CrashReporter"]),
         @"mounts": @[DODiagnosticMount(@"/usr/lib"), DODiagnosticMount(@"/var/jb")],
         @"rule_summary": ruleSummary,
         @"quarantine_map_readable": @([map isKindOfClass:NSArray.class]),
