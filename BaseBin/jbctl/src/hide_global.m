@@ -3,6 +3,7 @@
 #import <libjailbreak/libjailbreak.h>
 #import <libjailbreak/util.h>
 #import <sys/stat.h>
+#import <errno.h>
 
 // ---------------------------------------------------------------------------
 // URL scheme hiding (ported from DOEnvironmentManager.m)
@@ -193,23 +194,70 @@ static void hideItemAtPath(NSString *src)
 	auditLog([NSString stringWithFormat:@"hide ok: %@", src]);
 }
 
-static void restoreHiddenItems(void)
+// Keep the full journal on any failure. Successful entries are safe to retry:
+// their quarantine path is gone and their original path exists. Never replace
+// a concurrently recreated original with the quarantined copy.
+static int auditPathState(NSString *path)
+{
+	struct stat st;
+	if (lstat(path.fileSystemRepresentation, &st) == 0) return 1;
+	return errno == ENOENT ? 0 : -1;
+}
+
+static int restoreHiddenItems(void)
 {
 	NSFileManager *fm = [NSFileManager defaultManager];
+	int mapState = auditPathState(hideMapPath());
+	if (mapState == 0) return 0;
+	if (mapState < 0) return EIO;
 	NSArray *map = [NSArray arrayWithContentsOfFile:hideMapPath()];
+	if (!map) {
+		auditLog(@"audit_restore_v1: unreadable journal; preserved");
+		return EINVAL;
+	}
+	// Validate the entire journal before moving anything; do not discard malformed
+	// entries or allow a destination outside the quarantine directory.
+	for (id entry in map) {
+		if (![entry isKindOfClass:[NSDictionary class]]) return EINVAL;
+		id src = entry[@"src"], dst = entry[@"dst"];
+		if (![src isKindOfClass:[NSString class]] || ![dst isKindOfClass:[NSString class]]) return EINVAL;
+		if (![src isAbsolutePath] || ![dst isAbsolutePath] ||
+		    ![src isEqualToString:[src stringByStandardizingPath]] ||
+		    ![dst isEqualToString:[dst stringByStandardizingPath]] ||
+		    ![[dst stringByDeletingLastPathComponent] isEqualToString:hideQuarantineRoot()] ||
+		    [dst isEqualToString:hideMapPath()] ||
+		    [src isEqualToString:@"/"] || [src isEqualToString:hideQuarantineRoot()] ||
+		    [src hasPrefix:[hideQuarantineRoot() stringByAppendingString:@"/"]]) return EINVAL;
+	}
+	int result = 0;
 	for (NSDictionary *entry in [map reverseObjectEnumerator]) {
 		NSString *src = entry[@"src"];
 		NSString *dst = entry[@"dst"];
-		if (!src || !dst) continue;
-		if ([fm fileExistsAtPath:src]) continue;
-
-		[fm createDirectoryAtPath:[src stringByDeletingLastPathComponent]
+		int srcState = auditPathState(src), dstState = auditPathState(dst);
+		if (srcState == 1 && dstState == 0) continue; // prior completed move
+		if (srcState != 0 || dstState != 1) {
+			result = (srcState == 1 && dstState == 1) ? EEXIST : EIO;
+			auditLog([NSString stringWithFormat:@"audit_restore_v1: conflict/missing item; preserved: %@", src]);
+			continue;
+		}
+		NSError *error = nil;
+		if (![fm createDirectoryAtPath:[src stringByDeletingLastPathComponent]
 	      withIntermediateDirectories:YES
 	                       attributes:nil
-	                            error:nil];
-		[fm moveItemAtPath:dst toPath:src error:nil];
+	                            error:&error] ||
+		    ![fm moveItemAtPath:dst toPath:src error:&error] ||
+		    auditPathState(src) != 1 || auditPathState(dst) != 0) {
+			result = EIO;
+			auditLog([NSString stringWithFormat:@"audit_restore_v1: restore failed; journal retained: %@ (%@)", src, error]);
+		}
 	}
-	[fm removeItemAtPath:hideMapPath() error:nil];
+	if (result != 0) return result;
+	NSError *error = nil;
+	if (![fm removeItemAtPath:hideMapPath() error:&error]) {
+		auditLog([NSString stringWithFormat:@"audit_restore_v1: journal cleanup failed: %@", error]);
+		return EIO;
+	}
+	return 0;
 }
 
 static BOOL doAuditName(NSString *name, NSArray<NSString *> *exact, NSArray<NSString *> *regex)
@@ -347,8 +395,8 @@ int hide_global_audit_restore(void)
 {
 	@autoreleasepool {
 		auditLog(@"=== audit restore START ===");
-		restoreHiddenItems();
-		auditLog(@"=== audit restore END ===");
+		int result = restoreHiddenItems();
+		auditLog([NSString stringWithFormat:@"=== audit restore END result=%d ===", result]);
+		return result;
 	}
-	return 0;
 }
