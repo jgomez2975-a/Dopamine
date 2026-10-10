@@ -26,6 +26,9 @@ bool app_hide_is_blacklisted_pid(pid_t pid);
 // clean system, then restore once the app exits.
 int app_hide_global_hide(void);
 int app_hide_global_restore(void);
+// Pins visibility from verified restore through launchd self-spawn.
+int app_hide_prepare_userspace_restart(void);
+void app_hide_cancel_userspace_restart(void);
 // A successful begin transfers one owned lease to watch_exit or cancel_spawn.
 int app_hide_begin_spawn(void **context);
 void app_hide_cancel_spawn(void *context);

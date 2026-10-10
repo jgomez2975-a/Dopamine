@@ -99,25 +99,6 @@ void early_boot_done(void)
 	gInEarlyBoot = false;
 }
 
-void ensure_fakelib_mounted(void)
-{
-	struct statfs fsb;
-	if (statfs("/usr/lib", &fsb) != 0) return;
-	if (strcmp(fsb.f_mntonname, "/usr/lib") != 0) {
-		systemwide_domain_set_enabled(true);
-
-		// The jailbreak server is not reachable at this point in the launchd lifecycle
-		// So we need to host our own, just so that jbctl can talk to it
-		mach_port_t serverPort = jbserver_local_start();
-		jbctl_earlyboot(serverPort, "internal", "fakelib", "mount", NULL);
-		jbserver_local_stop();
-
-		// Note down that the jailbreak was hidden
-		// So that after the userspace reboot, we can unmount fakelib again
-		setenv("DOPAMINE_IS_HIDDEN", "1", true);
-	}
-}
-
 static bool should_block_injection(const char *executablePath)
 {
 	if (!executablePath) return false;
@@ -191,15 +172,20 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			// Instead of the ordinary hook, we want to reinsert this dylib
 			// This has already been done in envp so we only need to call the original posix_spawn
 
-			// We are back in "early boot" for the remainder of this launchd instance
+			// Verify entry, audit restoration and mount before tearing anything
+            // down. Keep visibility pinned until self-spawn succeeds or fails.
+            int prepareResult = app_hide_prepare_userspace_restart();
+            if (prepareResult != 0) return prepareResult;
+            bool wasInEarlyBoot = gInEarlyBoot;
+
+            // We are back in "early boot" for the remainder of this launchd instance
 			// Mainly so we don't lock up while spawning boomerang
 			gInEarlyBoot = true;
 
 			hookd_provider_teardown();
 
-			// If the jailbreak is currently hidden, fakelib is not mounted
-			// It needs to be mounted to regain launchd code execution after the userspace reboot
-			ensure_fakelib_mounted();
+            // Full restore above replaces the old mount-only path, which set
+            // DOPAMINE_IS_HIDDEN and caused the next launchd to unmount again.
 
 #if LOG_PROCESS_LAUNCHES
 			FILE *f = fopen("/var/mobile/launch_log.txt", "a");
@@ -234,7 +220,12 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			// setenv / unsetenv can sometimes cause environ to get reallocated
 			// In that case envp may point to garbage or be empty
 			// Say goodbye to this process
-			return __posix_spawn_orig_wrapper(pid, path, desc, argv, environ);
+			int restartResult = __posix_spawn_orig_wrapper(pid, path, desc, argv, environ);
+            if (restartResult != 0) {
+                gInEarlyBoot = wasInEarlyBoot;
+                app_hide_cancel_userspace_restart();
+            }
+            return restartResult;
 		}
 	}
 

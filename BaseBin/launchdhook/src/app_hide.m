@@ -360,7 +360,7 @@ static void app_hide_kill_jailbreak_apps(void);
 static int app_hide_run_jbctl(const char *command, const char *arg)
 {
 	// jbctl carries the bindfs-allow entitlement + root; host a local jbserver so
-	// it can talk to us, same pattern as ensure_fakelib_mounted().
+	// it can talk to us, using the earlyboot local-server pattern.
 	systemwide_domain_set_enabled(true);
 	mach_port_t serverPort = jbserver_local_start();
 	int result = jbctl_earlyboot(serverPort, "internal", command, arg, NULL);
@@ -442,10 +442,10 @@ static int app_hide_transition_result(const char *operation, int result)
     pthread_mutex_lock(&gVisibility.lock);
     unsigned refs = gVisibility.references;
     int phase = gVisibility.phase, lastError = gVisibility.lastError;
-    bool busy = gVisibility.busy;
+    bool busy = gVisibility.busy, restart = gVisibility.restartPrepared;
     pthread_mutex_unlock(&gVisibility.lock);
-    app_hide_log([NSString stringWithFormat:@"entry_state_v2: %s result=%d phase=%d refs=%u busy=%d last_error=%d",
-        operation, result, phase, refs, busy, lastError]);
+    app_hide_log([NSString stringWithFormat:@"entry_state_v2: %s result=%d phase=%d refs=%u busy=%d restart=%d last_error=%d",
+        operation, result, phase, refs, busy, restart, lastError]);
     // Helper exit statuses are not necessarily POSIX errno values.
     return result == 0 ? 0 : (result == EBUSY ? EBUSY : EIO);
 }
@@ -480,6 +480,19 @@ void app_hide_cancel_spawn(void *context)
     DOAppHideLease *owner = (__bridge_transfer DOAppHideLease *)context;
     app_hide_transition_result("spawn_cancel", jb_visibility_release(&gVisibility,
         &owner->lease, app_hide_apply_restore, NULL));
+}
+
+int app_hide_prepare_userspace_restart(void)
+{
+    int result = jb_visibility_prepare_restart(&gVisibility, app_hide_apply_restore, NULL);
+    if (result == 0) unsetenv("DOPAMINE_IS_HIDDEN");
+    return app_hide_transition_result("restart_prepare", result);
+}
+
+void app_hide_cancel_userspace_restart(void)
+{
+    jb_visibility_cancel_restart(&gVisibility);
+    app_hide_transition_result("restart_cancel", 0);
 }
 
 bool app_hide_is_currently_hidden(void)

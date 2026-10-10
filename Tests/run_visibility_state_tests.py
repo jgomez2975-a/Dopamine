@@ -78,6 +78,19 @@ int main(void){
  snapshot(&h,JB_VISIBLE,1,true,0);CHECK(release(&h,&h.first)==EBUSY);
  CHECK(acquire(&h,&h.second)==EBUSY);resume(&h);CHECK(pthread_join(t,NULL)==0);
  CHECK(w.result==ECANCELED);snapshot(&h,JB_VISIBLE,0,false,0);CHECK(h.restoreCalls==1);destroy(&h);
+ // Visibility is restored and pinned across restart preparation. New hides
+ // cannot race the actual launchd self-spawn, even with old live leases.
+ init(&h);CHECK(acquire(&h,&h.first)==0);
+ CHECK(jb_visibility_prepare_restart(&h.state,restore,&h)==0);
+ snapshot(&h,JB_VISIBLE,1,false,0);CHECK(h.state.restartPrepared);
+ CHECK(acquire(&h,&h.second)==EBUSY);CHECK(!h.second.held);
+ CHECK(jb_visibility_restore(&h.state,restore,&h)==EBUSY);
+ CHECK(jb_visibility_prepare_restart(&h.state,restore,&h)==EBUSY);
+ CHECK(release(&h,&h.first)==0);snapshot(&h,JB_VISIBLE,0,false,0);
+ jb_visibility_cancel_restart(&h.state);CHECK(!h.state.restartPrepared);
+ h.restoreError=EACCES;CHECK(jb_visibility_prepare_restart(&h.state,restore,&h)==EACCES);
+ CHECK(!h.state.restartPrepared);snapshot(&h,JB_VISIBILITY_FAILED,0,false,EACCES);
+ h.restoreError=0;CHECK(jb_visibility_restore(&h.state,restore,&h)==0);destroy(&h);
  // Delayed role and exit callbacks race on the same lease. A different app's
  // lease survives, even after the other app has been resurrected/reacquired.
  init(&h);

@@ -20,9 +20,10 @@ typedef struct {
     unsigned int references;
     bool busy;
     bool restorePending;
+    bool restartPrepared;
     int lastError;
 } JBVisibilityState;
-#define JB_VISIBILITY_INITIALIZER { PTHREAD_MUTEX_INITIALIZER, JB_VISIBLE, 0, false, false, 0 }
+#define JB_VISIBILITY_INITIALIZER { PTHREAD_MUTEX_INITIALIZER, JB_VISIBLE, 0, false, false, false, 0 }
 
 static inline int jb_visibility_finish(JBVisibilityState *s,
     JBVisibilityPhase phase, int operationResult, int stateError,
@@ -55,7 +56,7 @@ static inline int jb_visibility_acquire(JBVisibilityState *s, JBVisibilityLease 
     JBVisibilityOperation hide, JBVisibilityOperation restore, void *context)
 {
     pthread_mutex_lock(&s->lock);
-    if (s->busy) { pthread_mutex_unlock(&s->lock); return EBUSY; }
+    if (s->busy || s->restartPrepared) { pthread_mutex_unlock(&s->lock); return EBUSY; }
     if (s->phase == JB_VISIBILITY_FAILED) {
         int error = s->lastError ? s->lastError : EIO;
         pthread_mutex_unlock(&s->lock); return error;
@@ -108,7 +109,7 @@ static inline int jb_visibility_restore(JBVisibilityState *s,
     JBVisibilityOperation restore, void *context)
 {
     pthread_mutex_lock(&s->lock);
-    if (s->busy) { pthread_mutex_unlock(&s->lock); return EBUSY; }
+    if (s->busy || s->restartPrepared) { pthread_mutex_unlock(&s->lock); return EBUSY; }
     s->busy = true;
     pthread_mutex_unlock(&s->lock);
     // Explicit app resurrection also validates the physical entry when the
@@ -116,5 +117,30 @@ static inline int jb_visibility_restore(JBVisibilityState *s,
     int result = restore(context);
     return jb_visibility_finish(s, result == 0 ? JB_VISIBLE : JB_VISIBILITY_FAILED,
         result, result, restore, context);
+}
+static inline int jb_visibility_prepare_restart(JBVisibilityState *s,
+    JBVisibilityOperation restore, void *context)
+{
+    pthread_mutex_lock(&s->lock);
+    if (s->busy || s->restartPrepared) { pthread_mutex_unlock(&s->lock); return EBUSY; }
+    s->restartPrepared = true;
+    s->busy = true;
+    pthread_mutex_unlock(&s->lock);
+    int result = restore(context);
+    result = jb_visibility_finish(s, result == 0 ? JB_VISIBLE : JB_VISIBILITY_FAILED,
+        result, result, restore, context);
+    if (result != 0) {
+        pthread_mutex_lock(&s->lock);
+        s->restartPrepared = false;
+        pthread_mutex_unlock(&s->lock);
+    }
+    return result;
+}
+
+static inline void jb_visibility_cancel_restart(JBVisibilityState *s)
+{
+    pthread_mutex_lock(&s->lock);
+    if (!s->busy) s->restartPrepared = false;
+    pthread_mutex_unlock(&s->lock);
 }
 #endif
