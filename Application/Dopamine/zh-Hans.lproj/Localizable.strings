@@ -169,3 +169,9 @@
 "JB_Entry_Recovery_Verified" = "越狱入口已验证";
 "JB_Entry_Recovery_Stopped" = "入口恢复已停止";
 "JB_Entry_Recovery_Result_Body" = "请截图并重新导出诊断报告。尚未刷新应用或重启；先不要测试隐藏 App，也不要删除备份。";
+
+"Button_Helper_Transition" = "修复维护程序启动（保留备份）";
+"Button_Helper_Transition_Rollback" = "回退维护程序配置";
+"Helper_Transition_Consent" = "先备份 basebin/config.plist，仅将准确的 jbctl 维护程序路径加入已有的不注入列表，保留其他设置。不重启、不更新环境。这是受控恢复测试，不代表已证明闪退修复。";
+"Helper_Transition_Rollback_Consent" = "仅在配置仍与本次修改一致时恢复备份，保留所有备份文件。原配置不存在时写入空字典并刷新时间戳，以清除旧版缓存。不重启。";
+"Helper_Transition_Result" = "这里只确认配置操作，不代表运行已生效。请截图并导出诊断；暂不更新环境、不重启，也不要反复修复或回退。";

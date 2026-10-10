@@ -173,3 +173,9 @@
 "JB_Entry_Recovery_Verified" = "Jailbreak entry verified";
 "JB_Entry_Recovery_Stopped" = "Entry recovery stopped";
 "JB_Entry_Recovery_Result_Body" = "Take a screenshot and export diagnostics again. Apps have not been refreshed and no reboot was performed. Do not test hidden apps or delete the backup yet.";
+
+"Button_Helper_Transition" = "Repair maintenance helper launch (keep backup)";
+"Button_Helper_Transition_Rollback" = "Roll back maintenance helper configuration";
+"Helper_Transition_Consent" = "Backs up basebin/config.plist and adds only the exact jbctl helper path to the existing no-injection list. Other settings are preserved. Does not restart or update the environment. This is a controlled recovery test, not proof the crash is fixed.";
+"Helper_Transition_Rollback_Consent" = "Restores saved configuration only if it still matches our change. Backups are retained. If the original config was absent, writes an empty dictionary with a newer timestamp to clear the old cache. Does not restart.";
+"Helper_Transition_Result" = "Configuration result only, not runtime verification. Screenshot this result and export diagnostics. Do not update the environment, restart or repeatedly apply/roll back yet.";

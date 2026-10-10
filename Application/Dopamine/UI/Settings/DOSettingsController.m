@@ -23,12 +23,17 @@
 #import "DOButtonCell.h"
 #import "DOReadOnlyDiagnostics.h"
 #import "DOJBEntryRecovery.h"
+#import "DOHelperTransition.h"
 
 @interface DOSettingsController ()
 - (void)exportEnvironmentDiagnosticsPressed;
 - (void)collectAndShareEnvironmentDiagnostics;
 - (void)repairJBEntryPressed;
 - (void)performJBEntryRecovery;
+- (void)helperTransitionPressed;
+- (void)helperTransitionRollbackPressed;
+- (void)confirmHelperTransition:(BOOL)rollback;
+- (void)performHelperTransition:(BOOL)rollback;
 
 @end
 
@@ -341,6 +346,19 @@
                 [recoverySpecifier setProperty:@"link.badge.plus" forKey:@"image"];
                 [recoverySpecifier setProperty:@"repairJBEntryPressed" forKey:@"action"];
                 [specifiers addObject:recoverySpecifier];
+
+                for (NSDictionary *button in @[
+                    @{@"title":@"Button_Helper_Transition", @"action":@"helperTransitionPressed"},
+                    @{@"title":@"Button_Helper_Transition_Rollback", @"action":@"helperTransitionRollbackPressed"}]) {
+                    PSSpecifier *item = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+                    [item setProperty:button[@"title"] forKey:@"title"];
+                    [item setProperty:[DOButtonCell class] forKey:@"cellClass"];
+                    [item setProperty:buttonHeight forKey:@"height"];
+                    [item setProperty:@"wrench.and.screwdriver" forKey:@"image"];
+                    [item setProperty:button[@"action"] forKey:@"action"];
+                    [specifiers addObject:item];
+                }
+
 
                 if (envManager.isJailbroken) {
                     PSSpecifier *refreshAppsSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
@@ -787,6 +805,51 @@
 
 #pragma mark - Button Actions
 
+- (void)helperTransitionPressed { [self confirmHelperTransition:NO]; }
+- (void)helperTransitionRollbackPressed { [self confirmHelperTransition:YES]; }
+
+- (void)confirmHelperTransition:(BOOL)rollback
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(rollback ? @"Button_Helper_Transition_Rollback" : @"Button_Helper_Transition")
+        message:DOLocalizedString(rollback ? @"Helper_Transition_Rollback_Consent" : @"Helper_Transition_Consent") preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Continue") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [self performHelperTransition:rollback];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)performHelperTransition:(BOOL)rollback
+{
+    NSString *recordPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"Dopamine-HelperTransition.plist"];
+    id saved = [NSDictionary dictionaryWithContentsOfFile:recordPath];
+    NSMutableDictionary *record = [saved isKindOfClass:NSDictionary.class] ? [saved mutableCopy] : [NSMutableDictionary dictionary];
+    id previous = record[@"apply"];
+    NSString *backup = [previous isKindOfClass:NSDictionary.class] ? previous[@"backup_directory"] : nil;
+    __block NSDictionary *result = @{@"status":@"root_access_unavailable"};
+    DOEnvironmentManager *env = [DOEnvironmentManager sharedManager];
+    if (rollback && ![backup isKindOfClass:NSString.class]) result = @{@"status":@"no_recorded_backup"};
+    else if (env.isJailbroken && env.isBootstrapped) {
+        @synchronized (env) {
+            [env runAsRoot:^{ [env runUnsandboxed:^{
+                result = DOHelperTransition(JBROOT_PATH(@"/"), rollback ? backup : nil);
+            }]; }];
+        }
+    }
+    if (rollback) record[@"rollback"] = result;
+    else if (result[@"backup_directory"]) record[@"apply"] = result;
+    record[@"last_result"] = result;
+    record[@"last_operation"] = rollback ? @"rollback" : @"apply";
+    record[@"date"] = NSDate.date.description;
+    BOOL recorded = [record writeToFile:recordPath atomically:YES];
+    NSString *message = [NSString stringWithFormat:@"%@\n\nstatus=%@\nerrno=%@\nbackup=%@\nrecord_saved=%@",
+        DOLocalizedString(@"Helper_Transition_Result"), result[@"status"], result[@"errno"] ?: @0,
+        result[@"backup_directory"] ?: backup ?: @"none", recorded ? @"yes" : @"no"];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Button_Helper_Transition") message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Close") style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)repairJBEntryPressed
 {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Button_JB_Entry_Recovery")
@@ -850,6 +913,8 @@
     if (!snapshot) collect(); // Read-only fallback reports access errors explicitly.
     NSMutableDictionary *report = [snapshot mutableCopy];
     report[@"diagnostic_schema"] = @1;
+    NSDictionary *transition = [NSDictionary dictionaryWithContentsOfFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"Dopamine-HelperTransition.plist"]];
+    if (transition) report[@"helper_transition"] = transition;
     NSData *recoveryData = [NSData dataWithContentsOfFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"Dopamine-JBEntryRecovery.json"]];
     if (recoveryData) {
         id recovery = [NSJSONSerialization JSONObjectWithData:recoveryData options:0 error:NULL];

@@ -1,12 +1,15 @@
 #pragma once
 #import <Foundation/Foundation.h>
+#ifndef JB_TRANSITION_ROOT_PREFIX
+#define JB_TRANSITION_ROOT_PREFIX @"/private/preboot/"
+#endif
 
 // Pure preparation only. The caller must snapshot, persist a backup and perform
 // guarded writes separately. Never silently replace malformed existing config:
 // the old launchd reader assumes every ProcessBlacklist member is a string.
 static inline NSDictionary *JBHelperTransitionPlan(NSData *original, NSString *root)
 {
-    if (![root isKindOfClass:NSString.class] || ![root hasPrefix:@"/private/preboot/"] ||
+    if (![root isKindOfClass:NSString.class] || ![root hasPrefix:JB_TRANSITION_ROOT_PREFIX] ||
         ![root.lastPathComponent isEqual:@"procursus"] ||
         ![root isEqual:root.stringByStandardizingPath])
         return @{@"status": @"invalid_root"};
