@@ -2,7 +2,7 @@ name: "AppHide persistence: test and build"
 
 on:
   push:
-    branches: ["fix/app-hide-persistence-3.0.10.2", "fix/environment-readonly-diagnostics", "fix/jb-entry-recovery"]
+    branches: ["fix/app-hide-persistence-3.0.10.2", "fix/environment-readonly-diagnostics", "fix/jb-entry-recovery", "fix/jb-entry-guard-stage1"]
   workflow_dispatch:
 
 permissions:
@@ -33,6 +33,9 @@ jobs:
           python3 Tests/run_app_hide_tests.py
           python3 Tests/run_diagnostic_tests.py
           python3 Tests/run_recovery_tests.py
+          python3 Tests/run_entry_guard_tests.py
+          python3 Tests/run_entry_restore_tests.py
+          python3 Tests/reproduce_entry_race.py --output "$RUNNER_TEMP/entry-evidence"
 
       - name: Cache SwiftPM
         uses: actions/cache@v4
@@ -146,7 +149,7 @@ jobs:
         id: dopamine-latest-upload
         uses: actions/upload-artifact@v4
         with:
-          name: Dopamine-recovery-${{ github.sha }}
+          name: Dopamine-validation-${{ github.sha }}
           if-no-files-found: error
           path: |
             ${{ github.workspace }}/Application/Dopamine.ipa

@@ -1,0 +1,13 @@
+// Captured from commit b9554e5c55fcca74fb90d59986e557aced06de93
+static void app_hide_do_restore(void)
+{
+	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
+	if (jbroot && jbroot[0]) {
+		unlink("/var/jb");
+		symlink(jbroot, "/var/jb");
+	}
+
+	// Restore the quarantined files, then remount fakelib.
+	app_hide_run_jbctl("audit", "restore");
+	app_hide_run_jbctl("fakelib", "mount");
+}

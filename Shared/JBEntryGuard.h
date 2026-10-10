@@ -4,7 +4,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-/* Candidate primitive, NOT YET WIRED INTO LAUNCHD.
+/* Used by the launchd restore path (stage 1: entry integrity only).
  * No unlink/rename: an already-correct link is a no-op. A directory conflict
  * is an explicit error, never success and never recursively removed.
  * Does not serialize deliberate hiding, prevent external writers, or repair

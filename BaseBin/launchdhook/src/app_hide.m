@@ -33,6 +33,7 @@
 #include <libjailbreak/codesign.h>
 #include <libjailbreak/util.h>
 #include "jbserver/jbserver_local.h"
+#include "../../../Shared/JBEntryGuard.h"
 
 extern void systemwide_domain_set_enabled(bool enabled);
 
@@ -342,14 +343,15 @@ static pthread_mutex_t gJailbreakAppLock = PTHREAD_MUTEX_INITIALIZER;
 
 static void app_hide_kill_jailbreak_apps(void);
 
-static void app_hide_run_jbctl(const char *command, const char *arg)
+static int app_hide_run_jbctl(const char *command, const char *arg)
 {
 	// jbctl carries the bindfs-allow entitlement + root; host a local jbserver so
 	// it can talk to us, same pattern as ensure_fakelib_mounted().
 	systemwide_domain_set_enabled(true);
 	mach_port_t serverPort = jbserver_local_start();
-	jbctl_earlyboot(serverPort, "internal", command, arg, NULL);
+	int result = jbctl_earlyboot(serverPort, "internal", command, arg, NULL);
 	jbserver_local_stop();
+	return result;
 }
 
 // Actual (reversible) hide/restore bodies, shared by the no-inject refcount
@@ -373,17 +375,34 @@ static void app_hide_do_hide(void)
 	unlink("/var/jb");
 }
 
-static void app_hide_do_restore(void)
+static int app_hide_do_restore(void)
 {
-	const char *jbroot = gSystemInfo.jailbreakInfo.rootPath;
-	if (jbroot && jbroot[0]) {
-		unlink("/var/jb");
-		symlink(jbroot, "/var/jb");
+	// Do not unlink a correct entry: this used to create a gap in which a
+	// package writer could create /var/jb as an ordinary directory.
+	int result = jb_entry_ensure_visible("/var/jb", gSystemInfo.jailbreakInfo.rootPath);
+	if (result != 0) {
+		app_hide_log([NSString stringWithFormat:@"entry_guard_v1: restore blocked, entry errno=%d; no files removed", result]);
+		return result;
 	}
 
-	// Restore the quarantined files, then remount fakelib.
-	app_hide_run_jbctl("audit", "restore");
-	app_hide_run_jbctl("fakelib", "mount");
+	// Never start dependent work through an invalid entry. Preserve helper
+	// status rather than silently treating a failed restore as successful.
+	result = app_hide_run_jbctl("audit", "restore");
+	if (result != 0) {
+		app_hide_log([NSString stringWithFormat:@"entry_guard_v1: audit restore failed, status=%d", result]);
+		return result;
+	}
+	result = app_hide_run_jbctl("fakelib", "mount");
+	if (result != 0) {
+		app_hide_log([NSString stringWithFormat:@"entry_guard_v1: fakelib mount failed, status=%d", result]);
+		return result;
+	}
+	// Catch an entry removed/replaced while the synchronous helpers ran.
+	struct stat root;
+	if (stat(gSystemInfo.jailbreakInfo.rootPath, &root) != 0) result = errno;
+	else result = jb_entry_link_matches("/var/jb", &root);
+	app_hide_log([NSString stringWithFormat:@"entry_guard_v1: restore postflight errno=%d", result]);
+	return result;
 }
 
 void app_hide_global_hide(void)

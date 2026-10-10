@@ -7,9 +7,11 @@ import argparse,errno,json,os,pathlib,tempfile
 parser=argparse.ArgumentParser();parser.add_argument('--output',required=True)
 a=parser.parse_args();out=pathlib.Path(a.output).resolve();out.mkdir(parents=True,exist_ok=True)
 repo=pathlib.Path(__file__).resolve().parents[1]
-src=(repo/'BaseBin/launchdhook/src/app_hide.m').read_text()
-body=src.split('static void app_hide_do_restore(void)',1)[1].split('void app_hide_global_hide',1)[0]
-assert 'unlink("/var/jb")' in body and 'symlink(jbroot, "/var/jb")' in body
+# The legacy sequence is a pinned fixture, not the current production body.
+# Keep replaying the old failure after the production code is corrected.
+src=(repo/'Tests/fixtures/legacy_entry_restore.txt').read_text()
+assert 'b9554e5c55fcca74fb90d59986e557aced06de93' in src
+assert 'unlink("/var/jb")' in src and 'symlink(jbroot, "/var/jb")' in src
 results=[]
 def attempt(op):
  try:op();return 0
@@ -38,6 +40,6 @@ with tempfile.TemporaryDirectory(prefix='entry-race-',dir=out) as td:
  entry2=p/'jb-hidden-interval';(entry2/'usr'/'lib').mkdir(parents=True)
  s=attempt(lambda:os.symlink(real,entry2,target_is_directory=True));assert s==errno.EEXIST
  results.append({'case':'writer_during_deliberate_hide','symlink_errno':s,'result':'requires_lifecycle_coordination_not_only_idempotence'})
-report={'scope':'filesystem syscall replay; writer deliberately scheduled, identity NOT attributed to a device process','source_file':'BaseBin/launchdhook/src/app_hide.m','cases':results}
+report={'scope':'filesystem syscall replay; writer deliberately scheduled, identity NOT attributed to a device process','legacy_source_commit':'b9554e5c55fcca74fb90d59986e557aced06de93','source_file':'Tests/fixtures/legacy_entry_restore.txt','cases':results}
 (out/'entry-race-reproduction.json').write_text(json.dumps(report,indent=2),encoding='utf8')
 print(json.dumps(report,indent=2));print('PASS: 4 deterministic filesystem scenarios')

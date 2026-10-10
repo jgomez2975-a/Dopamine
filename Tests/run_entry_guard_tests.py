@@ -1,9 +1,25 @@
 #!/usr/bin/env python3
-"""Compile candidate link guard on macOS; no iOS runtime integration."""
+"""Compile production link guard on macOS in isolated fixtures; not an iOS runtime test."""
 import pathlib,tempfile,subprocess,sys
 repo=pathlib.Path(__file__).resolve().parents[1]
 source=r'''
+#include <unistd.h>
+#include <sys/stat.h>
+#include <errno.h>
+static int raceMode, forcedError;
+static int racing_symlink(const char *root, const char *entry) {
+ if (forcedError) {errno=forcedError;return -1;}
+ if (raceMode) {
+  int mode=raceMode;raceMode=0;
+  int rc=mode==1 ? symlink(root,entry) : mkdir(entry,0700);
+  if(rc!=0)return rc;
+  errno=EEXIST;return -1;
+ }
+ return symlink(root,entry);
+}
+#define symlink racing_symlink
 #include "JBEntryGuard.h"
+#undef symlink
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +47,20 @@ int main(int argc,char **argv){
  CHECK(lstat(entry,&after)==0 && first.st_ino==after.st_ino);
  CHECK(jb_entry_ensure_visible(NULL,root)==EINVAL);
  CHECK(jb_entry_ensure_visible(entry,"")==EINVAL);
+ CHECK(unlink(entry)==0);
+ raceMode=1;CHECK(jb_entry_ensure_visible(entry,root)==0);
+ CHECK(lstat(entry,&after)==0 && S_ISLNK(after.st_mode));CHECK(unlink(entry)==0);
+ raceMode=2;CHECK(jb_entry_ensure_visible(entry,root)==EISDIR);
+ CHECK(lstat(entry,&after)==0 && S_ISDIR(after.st_mode));CHECK(rmdir(entry)==0);
+ forcedError=EACCES;CHECK(jb_entry_ensure_visible(entry,root)==EACCES);
+ CHECK(lstat(entry,&after)!=0 && errno==ENOENT);forcedError=0;
+ fd=open(entry,O_CREAT|O_EXCL|O_WRONLY,0600);CHECK(fd>=0);close(fd);
+ CHECK(jb_entry_ensure_visible(entry,root)==EINVAL);
+ CHECK(lstat(entry,&after)==0 && S_ISREG(after.st_mode));
+ CHECK(jb_entry_ensure_visible(entry,entry)==ENOTDIR);
+ CHECK(unlink(entry)==0);CHECK(symlink("/missing-guard-dangling-target",entry)==0);
+ CHECK(jb_entry_ensure_visible(entry,root)==ENOENT);
+ CHECK(lstat(entry,&after)==0 && S_ISLNK(after.st_mode));
  printf("PASS: %d guard assertions including 1000 no-op restores\n",count);return 0;
 }
 '''
