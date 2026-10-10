@@ -24,9 +24,12 @@ bool app_hide_is_blacklisted_pid(pid_t pid);
 // RootHide-style "no-injection" mode: temporarily hide the jailbreak globally
 // (remove /var/jb, unmount fakelib) so a bare-spawned (uninjected) app sees a
 // clean system, then restore once the app exits.
-void app_hide_global_hide(void);
-void app_hide_global_restore(void);
-void app_hide_watch_exit(pid_t pid);
+int app_hide_global_hide(void);
+int app_hide_global_restore(void);
+// A successful begin transfers one owned lease to watch_exit or cancel_spawn.
+int app_hide_begin_spawn(void **context);
+void app_hide_cancel_spawn(void *context);
+void app_hide_watch_exit(pid_t pid, void *context);
 
 // "Jailbreak app resurrection": while the jailbreak is hidden (a no-inject app
 // is running), spawning a jailbreak app (under /var/jb/) restores the jailbreak
@@ -38,16 +41,11 @@ bool app_hide_is_jailbreak_app(const char *path);
 // app: it lists every tweak's settings from /var/jb/Library/PreferenceBundles,
 // so it must resurrect the jailbreak too.
 bool app_hide_is_settings_app(const char *path);
-void app_hide_resurrect_for_jb_app(void);
+int app_hide_resurrect_for_jb_app(void);
 
 // Track a jailbreak app's pid after resurrection; it gets killed when the
 // jailbreak is re-hidden (so it doesn't write into the real jbroot after /var/jb
 // is removed).
 void app_hide_track_jailbreak_app(pid_t pid);
-
-// Schedule a delayed Mach-task-role check for a just-spawned no-inject app:
-// if the app turns out to be a background launch, undo the hide. This fixes
-// background refreshes/pushes from leaving the jailbreak hidden.
-void app_hide_check_role_after_spawn(pid_t pid);
 
 #endif // APP_HIDE_H

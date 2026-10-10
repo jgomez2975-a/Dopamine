@@ -310,7 +310,7 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 	// Settings.app (stock /Applications/Preferences.app) counts as a jailbreak
 	// app too: it lists every tweak's settings from /var/jb/Library/PreferenceBundles,
 	// so with the jailbreak hidden it would show no tweak settings at all.
-	if (path && app_hide_is_currently_hidden()) {
+	if (path) { // Validate known jailbreak app entry even after external changes.
 		bool isJbApp = app_hide_is_jailbreak_app(path);
 		bool isSettings = false;
 		if (!isJbApp) {
@@ -325,7 +325,8 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			}
 		}
 		if (isJbApp || isSettings) {
-			app_hide_resurrect_for_jb_app();
+			int restoreResult = app_hide_resurrect_for_jb_app();
+			if (restoreResult != 0) return restoreResult;
 			pid_t jbPid = 0;
 			int r = posix_spawn_hook_shared(&jbPid, path, desc, argv, envp, __posix_spawn_orig_wrapper, systemwide_trust_file_by_path, platform_set_process_debugged, jbsetting(jetsamMultiplier));
 			if (pid) *pid = jbPid;
@@ -379,17 +380,18 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			}
 
 			// Foreground launch: global hide + bare spawn + restore on exit.
-			app_hide_global_hide();
+			void *hideContext = NULL;
+			int hideResult = app_hide_begin_spawn(&hideContext);
+			if (hideResult != 0) return hideResult;
 			pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
 			int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, (char *const *)envp);
 			pid_t childPid = *blacklistedPidp;
 			if (pid) *pid = childPid;
 			app_hide_commit_pid(blacklistedPidp);
 			if (r == 0) {
-				app_hide_watch_exit(childPid);
-				app_hide_check_role_after_spawn(childPid);
+				app_hide_watch_exit(childPid, hideContext);
 			} else {
-				app_hide_global_restore();
+				app_hide_cancel_spawn(hideContext);
 			}
 			return r;
 		}

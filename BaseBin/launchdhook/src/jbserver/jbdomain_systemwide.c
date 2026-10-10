@@ -542,11 +542,9 @@ static int systemwide_blacklist_check(uint64_t pid, bool *blacklisted)
 
 static int systemwide_set_app_hidden(bool hidden)
 {
-	extern void app_hide_global_hide(void);
-	extern void app_hide_global_restore(void);
-	if (hidden) app_hide_global_hide();
-	else app_hide_global_restore();
-	return 0;
+	extern int app_hide_global_hide(void);
+	extern int app_hide_global_restore(void);
+	return hidden ? app_hide_global_hide() : app_hide_global_restore();
 }
 
 struct jbserver_domain gSystemwideDomain = {

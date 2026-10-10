@@ -34,6 +34,7 @@
 #include <libjailbreak/util.h>
 #include "jbserver/jbserver_local.h"
 #include "../../../Shared/JBEntryGuard.h"
+#include "../../../Shared/JBVisibilityState.h"
 
 extern void systemwide_domain_set_enabled(bool enabled);
 
@@ -195,12 +196,13 @@ bool app_hide_is_blacklisted_pid(pid_t pid)
 	return blacklisted;
 }
 
-static void app_hide_remove_pid(pid_t pid)
+static void app_hide_remove_pid(pid_t pid, int version)
 {
 	if (pid <= 0) return;
 	state_init();
 	pthread_rwlock_wrlock(&gStateLock);
-	[gBlacklistedState removeObjectForKey:@(pid)];
+	if (gBlacklistedState[@(pid)] && gBlacklistedState[@(pid)].intValue == version)
+		[gBlacklistedState removeObjectForKey:@(pid)];
 	pthread_rwlock_unlock(&gStateLock);
 }
 
@@ -331,9 +333,17 @@ void app_hide_init(void)
 // RootHide-style "no-injection" mode: temporary global hide + bare spawn
 // ---------------------------------------------------------------------------
 
-static bool gNoInjectActive = false;
-static int gNoInjectRefCount = 0;
-static pthread_mutex_t gNoInjectLock = PTHREAD_MUTEX_INITIALIZER;
+static JBVisibilityState gVisibility = JB_VISIBILITY_INITIALIZER;
+// The compatibility XPC switch has its own lease; it cannot release a spawned
+// app's lease. Spawn callbacks retain one DOAppHideLease per launch.
+static JBVisibilityLease gLegacyLease;
+@interface DOAppHideLease : NSObject {
+@public
+    JBVisibilityLease lease;
+}
+@end
+@implementation DOAppHideLease
+@end
 
 // Pids of jailbreak apps running "resurrected" (restored while the jailbreak was
 // hidden). Killed before the jailbreak is re-hidden so they don't keep writing
@@ -357,22 +367,28 @@ static int app_hide_run_jbctl(const char *command, const char *arg)
 // Actual (reversible) hide/restore bodies, shared by the no-inject refcount
 // path and the "jailbreak app resurrection" path.
 
-static void app_hide_do_hide(void)
+static int app_hide_do_hide(void)
 {
-	// Kill running jailbreak apps first, so they don't keep writing into the
-	// real jbroot after /var/jb is removed below.
-	app_hide_kill_jailbreak_apps();
+    const char *rootPath = gSystemInfo.jailbreakInfo.rootPath;
+    if (!rootPath || !rootPath[0]) return EINVAL;
+    struct stat root;
+    if (stat(rootPath, &root) != 0) return errno;
+    int result = jb_entry_link_matches("/var/jb", &root);
+    if (result != 0) return result;
 
-	// Unmount fakelib FIRST so the re-entrant jbctl spawn below runs without
-	// systemhook injection (same proven pattern as ensure_fakelib_mounted()).
-	unmount("/usr/lib", MNT_FORCE);
+    app_hide_kill_jailbreak_apps();
+    struct statfs fs;
+    if (statfs("/usr/lib", &fs) != 0) return errno;
+    if (strcmp(fs.f_mntonname, "/usr/lib") == 0 && unmount("/usr/lib", MNT_FORCE) != 0)
+        return errno;
+    result = app_hide_run_jbctl("audit", "hide");
+    if (result != 0) return result;
 
-	// Quarantine the jailbreak files a bare app can still see (the "suspicious
-	// files" under /var/mobile/Library). Pure file-rename, no uicache.
-	app_hide_run_jbctl("audit", "hide");
-
-	// Remove the /var/jb symlink last.
-	unlink("/var/jb");
+    // Never recursively delete an unexpected directory. Recheck after the
+    // synchronous helper; an error is rolled back by the transition owner.
+    result = jb_entry_link_matches("/var/jb", &root);
+    if (result != 0) return result;
+    return unlink("/var/jb") == 0 ? 0 : errno;
 }
 
 static int app_hide_do_restore(void)
@@ -405,52 +421,69 @@ static int app_hide_do_restore(void)
 	return result;
 }
 
-void app_hide_global_hide(void)
+static int app_hide_apply_hide(void *context)
 {
-	// Reference-counted: multiple no-inject apps may run concurrently. The
-	// actual hide only runs when the jailbreak isn't already hidden (i.e. the
-	// first no-inject app, or the first after a jailbreak-app resurrection).
-	pthread_mutex_lock(&gNoInjectLock);
-	gNoInjectRefCount++;
-	int refcount = gNoInjectRefCount;
-	bool wasHidden = gNoInjectActive;
-	gNoInjectActive = true;
-	pthread_mutex_unlock(&gNoInjectLock);
-	app_hide_log([NSString stringWithFormat:@"global_hide: refcount now %d", refcount]);
-	if (wasHidden) return;
-
-	app_hide_do_hide();
+    (void)context;
+    return app_hide_do_hide();
 }
 
-void app_hide_global_restore(void)
+static int app_hide_apply_restore(void *context)
 {
-	// Only restore once the LAST hidden app has exited.
-	pthread_mutex_lock(&gNoInjectLock);
-	if (gNoInjectRefCount <= 0) {
-		pthread_mutex_unlock(&gNoInjectLock);
-		app_hide_log(@"global_restore: refcount already 0 (no-op)");
-		return;
-	}
-	gNoInjectRefCount--;
-	int refcount = gNoInjectRefCount;
-	if (refcount > 0) {
-		pthread_mutex_unlock(&gNoInjectLock);
-		app_hide_log([NSString stringWithFormat:@"global_restore: refcount now %d (skip, still hidden)", refcount]);
-		return;
-	}
-	gNoInjectActive = false;
-	pthread_mutex_unlock(&gNoInjectLock);
-	app_hide_log(@"global_restore: refcount 0, restoring jailbreak");
+    (void)context;
+    return app_hide_do_restore();
+}
 
-	app_hide_do_restore();
+static int app_hide_transition_result(const char *operation, int result)
+{
+    pthread_mutex_lock(&gVisibility.lock);
+    unsigned refs = gVisibility.references;
+    int phase = gVisibility.phase, lastError = gVisibility.lastError;
+    bool busy = gVisibility.busy;
+    pthread_mutex_unlock(&gVisibility.lock);
+    app_hide_log([NSString stringWithFormat:@"entry_state_v2: %s result=%d phase=%d refs=%u busy=%d last_error=%d",
+        operation, result, phase, refs, busy, lastError]);
+    // Helper exit statuses are not necessarily POSIX errno values.
+    return result == 0 ? 0 : (result == EBUSY ? EBUSY : EIO);
+}
+
+int app_hide_global_hide(void)
+{
+    return app_hide_transition_result("legacy_hide", jb_visibility_acquire(&gVisibility,
+        &gLegacyLease, app_hide_apply_hide, app_hide_apply_restore, NULL));
+}
+
+int app_hide_global_restore(void)
+{
+    return app_hide_transition_result("legacy_restore", jb_visibility_release(&gVisibility,
+        &gLegacyLease, app_hide_apply_restore, NULL));
+}
+
+int app_hide_begin_spawn(void **context)
+{
+    if (!context) return EINVAL;
+    *context = NULL;
+    DOAppHideLease *owner = [DOAppHideLease new];
+    if (!owner) return ENOMEM;
+    int result = jb_visibility_acquire(&gVisibility, &owner->lease,
+        app_hide_apply_hide, app_hide_apply_restore, NULL);
+    if (result == 0) *context = (__bridge_retained void *)owner;
+    return app_hide_transition_result("spawn_acquire", result);
+}
+
+void app_hide_cancel_spawn(void *context)
+{
+    if (!context) return;
+    DOAppHideLease *owner = (__bridge_transfer DOAppHideLease *)context;
+    app_hide_transition_result("spawn_cancel", jb_visibility_release(&gVisibility,
+        &owner->lease, app_hide_apply_restore, NULL));
 }
 
 bool app_hide_is_currently_hidden(void)
 {
-	pthread_mutex_lock(&gNoInjectLock);
-	bool hidden = gNoInjectActive;
-	pthread_mutex_unlock(&gNoInjectLock);
-	return hidden;
+    pthread_mutex_lock(&gVisibility.lock);
+    bool hidden = gVisibility.busy || gVisibility.phase != JB_VISIBLE;
+    pthread_mutex_unlock(&gVisibility.lock);
+    return hidden;
 }
 
 bool app_hide_is_jailbreak_app(const char *path)
@@ -505,20 +538,10 @@ bool app_hide_is_settings_app(const char *path)
 	return [app_hide_bundle_id(path) isEqualToString:settingsBundleID];
 }
 
-void app_hide_resurrect_for_jb_app(void)
+int app_hide_resurrect_for_jb_app(void)
 {
-	// "Jailbreak app resurrection": a jailbreak app was spawned while the
-	// jailbreak was hidden (a no-inject app is running). Restore the jailbreak
-	// so the jailbreak app can run. The no-inject refcount is left intact (those
-	// apps are still running); only the hidden state is cleared, and we do NOT
-	// re-hide later (accepted limitation).
-	pthread_mutex_lock(&gNoInjectLock);
-	bool wasHidden = gNoInjectActive;
-	gNoInjectActive = false;
-	pthread_mutex_unlock(&gNoInjectLock);
-	if (!wasHidden) return;
-	app_hide_log(@"resurrect: jailbreak app spawned while hidden, restoring jailbreak");
-	app_hide_do_restore();
+    return app_hide_transition_result("resurrect", jb_visibility_restore(&gVisibility,
+        app_hide_apply_restore, NULL));
 }
 
 void app_hide_track_jailbreak_app(pid_t pid)
@@ -624,39 +647,44 @@ static int app_hide_get_app_state(pid_t pid)
 	return (int)app_state;
 }
 
-void app_hide_check_role_after_spawn(pid_t pid)
+void app_hide_watch_exit(pid_t pid, void *context)
 {
-	if (pid <= 0) return;
-	// The app state is assigned shortly after spawn: foreground apps become
-	// PROC_APPSTATE_ACTIVE (1), background apps stay background/suspended/nonui.
-	// Give the system a moment, then undo the hide if this turned out to be a
-	// background launch (so a background refresh doesn't leave the jailbreak
-	// hidden until the app exits).
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC),
-		dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-			int appState = app_hide_get_app_state(pid);
-			app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d", pid, appState]);
-			// 1 = PROC_APPSTATE_ACTIVE (foreground). Any other real value (2
-			// inactive / 3 background / 4 suspended / 5 nonui) is a background
-			// launch: undo the hide.
-			if (appState > 0 && appState != 1) {
-				app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d is background, restoring jailbreak", pid]);
-				app_hide_global_restore();
-			}
-		});
-}
-
-void app_hide_watch_exit(pid_t pid)
-{
-	if (pid <= 0) return;
-
-	dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, (uintptr_t)pid, DISPATCH_PROC_EXIT,
-		dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
-	dispatch_source_set_event_handler(source, ^{
-		app_hide_log([NSString stringWithFormat:@"watch_exit: pid %d exited", pid]);
-		app_hide_remove_pid(pid);
-		app_hide_global_restore();
-		dispatch_source_cancel(source);
-	});
-	dispatch_resume(source);
+    if (!context) return;
+    DOAppHideLease *owner = (__bridge_transfer DOAppHideLease *)context;
+    int version = proc_get_pidversion(pid);
+    // Both callbacks retain the SAME lease, so only the first release can
+    // decrement the reference count. PID reuse cannot release a newer lease.
+    void (^releaseOnce)(void) = ^{
+        app_hide_transition_result("pid_release", jb_visibility_release(&gVisibility,
+            &owner->lease, app_hide_apply_restore, NULL));
+    };
+    if (pid <= 0 || version == 0) { releaseOnce(); return; }
+    dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC,
+        (uintptr_t)pid, DISPATCH_PROC_EXIT,
+        dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
+    if (!source) {
+        app_hide_log(@"entry_state_v2: exit monitor allocation failed; releasing lease");
+        releaseOnce();
+        return;
+    }
+    dispatch_source_set_event_handler(source, ^{
+        app_hide_remove_pid(pid, version);
+        releaseOnce();
+        dispatch_source_cancel(source);
+    });
+    dispatch_source_set_registration_handler(source, ^{
+        if (proc_get_pidversion(pid) != version) {
+            app_hide_remove_pid(pid, version);
+            releaseOnce();
+            dispatch_source_cancel(source);
+        }
+    });
+    dispatch_resume(source);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC),
+        dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            if (proc_get_pidversion(pid) != version) { releaseOnce(); return; }
+            int appState = app_hide_get_app_state(pid);
+            app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d", pid, appState]);
+            if (appState > 0 && appState != 1) releaseOnce();
+        });
 }

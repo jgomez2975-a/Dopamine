@@ -8,7 +8,7 @@ repo = Path(__file__).resolve().parents[1]
 src = (repo/'BaseBin/launchdhook/src/app_hide.m').read_text(encoding='utf8')
 helper = src.split('static int app_hide_run_jbctl(', 1)[1].split('// Actual (reversible)', 1)[0]
 helper = 'static int app_hide_run_jbctl(' + helper
-body = src.split('static int app_hide_do_restore(void)', 1)[1].split('void app_hide_global_hide', 1)[0]
+body = src.split('static int app_hide_do_restore(void)', 1)[1].split('static int app_hide_apply_hide', 1)[0]
 body = 'static int app_hide_do_restore(void)' + body
 assert 'unlink(' not in body and 'symlink(' not in body
 assert 'jb_entry_ensure_visible' in body
