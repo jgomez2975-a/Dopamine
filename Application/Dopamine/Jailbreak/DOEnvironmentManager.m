@@ -6,6 +6,7 @@
 //
 
 #import "DOEnvironmentManager.h"
+#import "../../../Shared/JBQuarantine.h"
 #import "UIImage+JPEG2000.h"
 
 #import <sys/sysctl.h>
@@ -646,67 +647,11 @@ extern char **environ;
     return NO;
 }
 
-- (NSString *)hideQuarantineRoot
+- (NSString *)hideQuarantineRoot { return hideQuarantineRoot(); }
+
+- (int)restoreHiddenItems
 {
-    return @"/var/mobile/.DopamineHideQuarantine";
-}
-
-- (NSString *)hideMapPath
-{
-    return [[self hideQuarantineRoot] stringByAppendingPathComponent:@"map.plist"];
-}
-
-- (void)hideItemAtPath:(NSString *)src
-{
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *root = [self hideQuarantineRoot];
-
-    [fm createDirectoryAtPath:root
-  withIntermediateDirectories:YES
-                   attributes:nil
-                        error:nil];
-
-    NSString *dst = [root stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
-
-    NSError *err = nil;
-    if (![fm moveItemAtPath:src toPath:dst error:&err]) {
-        NSLog(@"[HideJailbreak] move failed %@ -> %@: %@", src, dst, err);
-        return;
-    }
-
-    NSMutableArray *map = [[NSArray arrayWithContentsOfFile:[self hideMapPath]] mutableCopy] ?: [NSMutableArray array];
-    [map addObject:@{ @"src": src, @"dst": dst }];
-    [map writeToFile:[self hideMapPath] atomically:YES];
-
-    NSLog(@"[HideJailbreak] hidden %@ -> %@", src, dst);
-}
-
-- (void)restoreHiddenItems
-{
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *map = [NSArray arrayWithContentsOfFile:[self hideMapPath]];
-
-    for (NSDictionary *entry in [map reverseObjectEnumerator]) {
-        NSString *src = entry[@"src"];
-        NSString *dst = entry[@"dst"];
-
-        if (!src || !dst) continue;
-        if ([fm fileExistsAtPath:src]) continue;
-
-        [fm createDirectoryAtPath:[src stringByDeletingLastPathComponent]
-      withIntermediateDirectories:YES
-                       attributes:nil
-                            error:nil];
-
-        NSError *err = nil;
-        if (![fm moveItemAtPath:dst toPath:src error:&err]) {
-            NSLog(@"[HideJailbreak] restore failed %@ -> %@: %@", dst, src, err);
-        } else {
-            NSLog(@"[HideJailbreak] restored %@", src);
-        }
-    }
-
-    [fm removeItemAtPath:[self hideMapPath] error:nil];
+    return auditWithLock(^int { return restoreHiddenItems(); });
 }
 
 #pragma mark - Injection Blocking Rules
@@ -1210,13 +1155,13 @@ extern char **environ;
 
 #pragma mark - Library Audit
 
-- (void)runJailbreakLibraryAudit
+- (int)runJailbreakLibraryAuditUnlocked
 {
     NSString *libraryRoot = @"/var/mobile/Library";
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:libraryRoot]) {
         NSLog(@"[HideJailbreak Audit] %@ is not accessible", libraryRoot);
-        return;
+        return EIO;
     }
 
     NSDictionary<NSString *, NSDictionary *> *rules = @{
@@ -1298,6 +1243,7 @@ extern char **environ;
         NSArray *blacklist = rule[@"blacklist"] ?: @[];
         NSArray *whitelistRegex = rule[@"whitelistRegex"] ?: @[];
         NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:path error:nil];
+        if (!children) return EIO;
 
         NSLog(@"[HideJailbreak Audit] rule %@ default=%@ entries=%lu", path, defaultAction ?: @"none", (unsigned long)children.count);
 
@@ -1316,7 +1262,8 @@ extern char **environ;
                               [result isEqualToString:@"DEFAULT-BLACKLIST"];
 
             if (shouldHide) {
-                [self hideItemAtPath:fullPath];
+                int hideResult = hideItemAtPath(fullPath);
+                if (hideResult != 0) return hideResult;
             } else {
                 NSLog(@"[HideJailbreak] keep %@ -> %@", fullPath, result);
             }
@@ -1328,11 +1275,25 @@ extern char **environ;
     for (NSString *name in hiddenDocs) {
         NSString *fullPath = [docsPath stringByAppendingPathComponent:name];
         if ([fm fileExistsAtPath:fullPath]) {
-            [self hideItemAtPath:fullPath];
+            int hideResult = hideItemAtPath(fullPath);
+            if (hideResult != 0) return hideResult;
         }
     }
 
     NSLog(@"[HideJailbreak Audit] end");
+    return 0;
+}
+
+- (int)runJailbreakLibraryAudit
+{
+    return auditWithLock(^int {
+        int result = [self runJailbreakLibraryAuditUnlocked];
+        if (result != 0) {
+            int rollback = restoreHiddenItems();
+            NSLog(@"audit_transaction_v2: app hide failed=%d rollback=%d", result, rollback);
+        }
+        return result;
+    });
 }
 
 - (BOOL)isJailbreakHidden
@@ -1351,6 +1312,11 @@ extern char **environ;
         BOOL alreadyHidden = [self isJailbreakHidden];
         if (hidden != alreadyHidden) {
             if (hidden) {
+                int auditResult = [self runJailbreakLibraryAudit];
+                if (auditResult != 0) {
+                    NSLog(@"[HideJailbreak] audit failed (%d); stopped before entry removal", auditResult);
+                    return;
+                }
                 // 用户手动隐藏：删掉 monitor 标记，防止 monitor 自动恢复
                 [[NSFileManager defaultManager] removeItemAtPath:@"/var/mobile/.DopamineMonitorDidHide" error:nil];
 
@@ -1378,21 +1344,23 @@ extern char **environ;
 
                 [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
 
-                [self runJailbreakLibraryAudit];
-
                 if ([self isJailbroken]) {
                     jbclient_platform_set_systemwide_domain_enabled(false);
                     jbclient_platform_set_crashreporter_enabled(false);
                 }
             }
             else {
+                int restoreResult = [self restoreHiddenItems];
+                if (restoreResult != 0) {
+                    NSLog(@"[HideJailbreak] restore failed (%d); journal preserved", restoreResult);
+                    return;
+                }
                 if ([self isJailbroken]) {
                     jbclient_platform_set_systemwide_domain_enabled(true);
                     jbclient_platform_set_crashreporter_enabled(true);
                     [[NSFileManager defaultManager] removeItemAtPath:@"/var/mobile/.DopamineCrashReporterDisabled" error:nil];
                 }
 
-                [self restoreHiddenItems];
                 [self restoreJailbreakURLSchemes];
 
                 [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb"
@@ -1418,7 +1386,8 @@ extern char **environ;
         }
         else if (hidden) {
             [self hideJailbreakURLSchemes];
-            [self runJailbreakLibraryAudit];
+            int auditResult = [self runJailbreakLibraryAudit];
+            if (auditResult != 0) NSLog(@"[HideJailbreak] audit failed: %d", auditResult);
         }
     };
     

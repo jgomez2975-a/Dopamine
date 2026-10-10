@@ -8,8 +8,8 @@ LDFLAGS = -L../.build -ljailbreak -lchoma
 sign: $(TARGET)
 	@ldid -Cadhoc -Sentitlements.plist $<
 
-$(TARGET): $(wildcard src/*.m)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+$(TARGET): $(wildcard src/*.m) ../../Shared/JBQuarantine.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(wildcard src/*.m)
 
 clean:
 	@rm -f $(TARGET)

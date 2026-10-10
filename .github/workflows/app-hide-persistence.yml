@@ -36,6 +36,7 @@ jobs:
           python3 Tests/run_entry_guard_tests.py
           python3 Tests/run_entry_restore_tests.py
           python3 Tests/run_audit_restore_tests.py
+          python3 Tests/run_quarantine_transaction_tests.py
           python3 Tests/reproduce_visibility_state.py
           python3 Tests/run_visibility_state_tests.py
           python3 Tests/run_visibility_integration_tests.py

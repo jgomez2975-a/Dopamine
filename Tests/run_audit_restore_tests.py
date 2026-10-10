@@ -11,12 +11,12 @@ import tempfile
 
 repo = Path(__file__).resolve().parents[1]
 source = (repo / 'BaseBin/jbctl/src/hide_global.m').read_text(encoding='utf8')
-body = source[source.index('static int auditPathState('):source.index('static BOOL doAuditName(')]
+body = (repo / 'Shared/JBQuarantine.h').read_text(encoding='utf8')
 public = source[source.index('int hide_global_audit_restore(void)'):]
 assert 'int result = restoreHiddenItems();' in public
-assert 'return result;' in public
+assert 'return auditWithLock(' in public
 assert 'if (result != 0) return result;' in body
-assert body.index('if (result != 0) return result;') < body.index('removeItemAtPath:hideMapPath()')
+assert body.index('if (result != 0) return result;', body.index('static inline int restoreHiddenItems')) < body.index('removeItemAtPath:hideMapPath()')
 
 program = r'''
 #import <Foundation/Foundation.h>
@@ -24,10 +24,10 @@ program = r'''
 #include <errno.h>
 #include <unistd.h>
 static NSString *fixture;
-static NSString *hideQuarantineRoot(void) { return [fixture stringByAppendingPathComponent:@"quarantine"]; }
-static NSString *hideMapPath(void) { return [hideQuarantineRoot() stringByAppendingPathComponent:@"map.plist"]; }
-static void auditLog(NSString *msg) { (void)msg; }
-''' + body + public + r'''
+#define JBQ_ROOT [fixture stringByAppendingPathComponent:@"quarantine"]
+#define JBQ_LOG(message) ((void)(message))
+#import "JBQuarantine.h"
+''' + public + r'''
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); return 1; } count++; } while(0)
 static BOOL put(NSString *path, NSString *text) {
  return [text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
@@ -105,5 +105,5 @@ with tempfile.TemporaryDirectory(prefix='audit-restore-') as td:
     p = Path(td)
     (p / 'test.m').write_text(program, encoding='utf8')
     subprocess.run(['xcrun','clang','-fobjc-arc','-framework','Foundation',
-                    '-Wall','-Wextra','-Werror',str(p/'test.m'),'-o',str(p/'test')],check=True)
+                    '-Wall','-Wextra','-Werror','-fblocks','-I',str(repo/'Shared'),str(p/'test.m'),'-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test'),td],check=True)

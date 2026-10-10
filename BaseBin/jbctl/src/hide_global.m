@@ -156,109 +156,7 @@ static void restoreJailbreakURLSchemes(void)
 // Jailbreak library audit / quarantine (ported from DOEnvironmentManager.m)
 // ---------------------------------------------------------------------------
 
-static NSString *hideQuarantineRoot(void)
-{
-	return @"/var/mobile/.DopamineHideQuarantine";
-}
-
-static NSString *hideMapPath(void)
-{
-	return [hideQuarantineRoot() stringByAppendingPathComponent:@"map.plist"];
-}
-
-static void auditLog(NSString *msg)
-{
-	FILE *f = fopen("/var/mobile/audit_log.txt", "a");
-	if (f) {
-		fprintf(f, "%s\n", msg.UTF8String);
-		fclose(f);
-	}
-}
-
-static void hideItemAtPath(NSString *src)
-{
-	NSFileManager *fm = [NSFileManager defaultManager];
-	NSString *root = hideQuarantineRoot();
-	[fm createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
-
-	NSString *dst = [root stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
-	if (![fm moveItemAtPath:src toPath:dst error:nil]) {
-		auditLog([NSString stringWithFormat:@"hide FAILED: %@", src]);
-		return;
-	}
-
-	NSMutableArray *map = [[NSArray arrayWithContentsOfFile:hideMapPath()] mutableCopy] ?: [NSMutableArray array];
-	[map addObject:@{ @"src": src, @"dst": dst }];
-	[map writeToFile:hideMapPath() atomically:YES];
-
-	auditLog([NSString stringWithFormat:@"hide ok: %@", src]);
-}
-
-// Keep the full journal on any failure. Successful entries are safe to retry:
-// their quarantine path is gone and their original path exists. Never replace
-// a concurrently recreated original with the quarantined copy.
-static int auditPathState(NSString *path)
-{
-	struct stat st;
-	if (lstat(path.fileSystemRepresentation, &st) == 0) return 1;
-	return errno == ENOENT ? 0 : -1;
-}
-
-static int restoreHiddenItems(void)
-{
-	NSFileManager *fm = [NSFileManager defaultManager];
-	int mapState = auditPathState(hideMapPath());
-	if (mapState == 0) return 0;
-	if (mapState < 0) return EIO;
-	NSArray *map = [NSArray arrayWithContentsOfFile:hideMapPath()];
-	if (!map) {
-		auditLog(@"audit_restore_v1: unreadable journal; preserved");
-		return EINVAL;
-	}
-	// Validate the entire journal before moving anything; do not discard malformed
-	// entries or allow a destination outside the quarantine directory.
-	for (id entry in map) {
-		if (![entry isKindOfClass:[NSDictionary class]]) return EINVAL;
-		id src = entry[@"src"], dst = entry[@"dst"];
-		if (![src isKindOfClass:[NSString class]] || ![dst isKindOfClass:[NSString class]]) return EINVAL;
-		if (![src isAbsolutePath] || ![dst isAbsolutePath] ||
-		    ![src isEqualToString:[src stringByStandardizingPath]] ||
-		    ![dst isEqualToString:[dst stringByStandardizingPath]] ||
-		    ![[dst stringByDeletingLastPathComponent] isEqualToString:hideQuarantineRoot()] ||
-		    [dst isEqualToString:hideMapPath()] ||
-		    [src isEqualToString:@"/"] || [src isEqualToString:hideQuarantineRoot()] ||
-		    [src hasPrefix:[hideQuarantineRoot() stringByAppendingString:@"/"]]) return EINVAL;
-	}
-	int result = 0;
-	for (NSDictionary *entry in [map reverseObjectEnumerator]) {
-		NSString *src = entry[@"src"];
-		NSString *dst = entry[@"dst"];
-		int srcState = auditPathState(src), dstState = auditPathState(dst);
-		if (srcState == 1 && dstState == 0) continue; // prior completed move
-		if (srcState != 0 || dstState != 1) {
-			result = (srcState == 1 && dstState == 1) ? EEXIST : EIO;
-			auditLog([NSString stringWithFormat:@"audit_restore_v1: conflict/missing item; preserved: %@", src]);
-			continue;
-		}
-		NSError *error = nil;
-		if (![fm createDirectoryAtPath:[src stringByDeletingLastPathComponent]
-	      withIntermediateDirectories:YES
-	                       attributes:nil
-	                            error:&error] ||
-		    ![fm moveItemAtPath:dst toPath:src error:&error] ||
-		    auditPathState(src) != 1 || auditPathState(dst) != 0) {
-			result = EIO;
-			auditLog([NSString stringWithFormat:@"audit_restore_v1: restore failed; journal retained: %@ (%@)", src, error]);
-		}
-	}
-	if (result != 0) return result;
-	NSError *error = nil;
-	if (![fm removeItemAtPath:hideMapPath() error:&error]) {
-		auditLog([NSString stringWithFormat:@"audit_restore_v1: journal cleanup failed: %@", error]);
-		return EIO;
-	}
-	return 0;
-}
+#import "../../../Shared/JBQuarantine.h"
 
 static BOOL doAuditName(NSString *name, NSArray<NSString *> *exact, NSArray<NSString *> *regex)
 {
@@ -270,7 +168,7 @@ static BOOL doAuditName(NSString *name, NSArray<NSString *> *exact, NSArray<NSSt
 	return NO;
 }
 
-static void runJailbreakLibraryAudit(void)
+static int runJailbreakLibraryAudit(void)
 {
 	NSFileManager *fm = [NSFileManager defaultManager];
 
@@ -344,6 +242,7 @@ static void runJailbreakLibraryAudit(void)
 		NSArray *blacklist = rule[@"blacklist"] ?: @[];
 		NSArray *whitelistRegex = rule[@"whitelistRegex"] ?: @[];
 		NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:path error:nil];
+		if (!children) return EIO;
 
 		for (NSString *name in children) {
 			BOOL white = doAuditName(name, whitelist, whitelistRegex);
@@ -355,14 +254,21 @@ static void runJailbreakLibraryAudit(void)
 			else result = @"UNMATCHED";
 
 			BOOL shouldHide = [result isEqualToString:@"BLACKLIST"] || [result isEqualToString:@"DEFAULT-BLACKLIST"];
-			if (shouldHide) hideItemAtPath([path stringByAppendingPathComponent:name]);
+			if (shouldHide) {
+				int result = hideItemAtPath([path stringByAppendingPathComponent:name]);
+				if (result != 0) return result;
+			}
 		}
 	}
 
 	for (NSString *name in @[@".misaka"]) {
 		NSString *fullPath = [@"/var/mobile/Documents" stringByAppendingPathComponent:name];
-		if ([fm fileExistsAtPath:fullPath]) hideItemAtPath(fullPath);
+		if ([fm fileExistsAtPath:fullPath]) {
+			int result = hideItemAtPath(fullPath);
+			if (result != 0) return result;
+		}
 	}
+	return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -383,20 +289,28 @@ int hide_global_urlschemes_show(void)
 
 int hide_global_audit_hide(void)
 {
-	@autoreleasepool {
-		auditLog(@"=== audit hide START ===");
-		runJailbreakLibraryAudit();
-		auditLog(@"=== audit hide END ===");
-	}
-	return 0;
+ @autoreleasepool {
+  return auditWithLock(^int {
+   auditLog(@"=== audit hide START ===");
+   int result = runJailbreakLibraryAudit();
+   if (result != 0) {
+    int rollback = restoreHiddenItems();
+    auditLog([NSString stringWithFormat:@"audit_transaction_v2: hide failed=%d rollback=%d", result, rollback]);
+   }
+   auditLog([NSString stringWithFormat:@"=== audit hide END result=%d ===", result]);
+   return result;
+  });
+ }
 }
 
 int hide_global_audit_restore(void)
 {
-	@autoreleasepool {
-		auditLog(@"=== audit restore START ===");
-		int result = restoreHiddenItems();
-		auditLog([NSString stringWithFormat:@"=== audit restore END result=%d ===", result]);
-		return result;
-	}
+ @autoreleasepool {
+  return auditWithLock(^int {
+   auditLog(@"=== audit restore START ===");
+   int result = restoreHiddenItems();
+   auditLog([NSString stringWithFormat:@"=== audit restore END result=%d ===", result]);
+   return result;
+  });
+ }
 }
