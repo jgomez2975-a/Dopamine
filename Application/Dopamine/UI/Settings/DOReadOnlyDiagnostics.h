@@ -73,6 +73,38 @@ static NSDictionary *DODiagnosticLog(NSString *path)
     } @finally { [file closeFile]; }
 }
 
+// Fixed allowlist only: collect metadata, never file contents or repair anything.
+// Destination must be a direct UUID child, not a path supplied by arbitrary data.
+static NSDictionary *DODiagnosticConflicts(id map, NSString *quarantineRoot, NSArray *allowedSources)
+{
+    if (![map isKindOfClass:NSArray.class]) return @{@"status": @"unreadable_map"};
+    if ([map count] > 4096) return @{@"status": @"map_too_large"};
+    NSMutableArray *items = [NSMutableArray array];
+    NSUInteger rejected = 0;
+    for (id entry in map) {
+        if (![entry isKindOfClass:NSDictionary.class]) { rejected++; continue; }
+        id src = entry[@"src"], dst = entry[@"dst"];
+        if (![src isKindOfClass:NSString.class] || ![allowedSources containsObject:src]) continue;
+        if (![dst isKindOfClass:NSString.class] ||
+            ![[dst stringByDeletingLastPathComponent] isEqual:quarantineRoot] ||
+            ![[NSUUID alloc] initWithUUIDString:[dst lastPathComponent]] ||
+            ![dst isEqual:[quarantineRoot stringByAppendingPathComponent:[dst lastPathComponent]]]) {
+            rejected++; continue;
+        }
+        NSDictionary *original = DODiagnosticPath(src), *saved = DODiagnosticPath(dst);
+        NSNumber *originalError = original[@"lstat_errno"], *savedError = saved[@"lstat_errno"];
+        NSString *state = @"metadata_error";
+        if (!originalError && !savedError) state = @"both_present";
+        else if (!originalError && savedError.intValue == ENOENT) state = @"original_only";
+        else if (originalError.intValue == ENOENT && !savedError) state = @"quarantine_only";
+        else if (originalError.intValue == ENOENT && savedError.intValue == ENOENT) state = @"both_missing";
+        [items addObject:@{@"state": state, @"original": original, @"quarantined": saved}];
+        if (items.count >= 32) break;
+    }
+    return @{@"status": @"metadata_only", @"items": items, @"rejected_entries": @(rejected),
+        @"scope": @"fixed_conflict_paths_only", @"journal_count_is_pending_count": @NO};
+}
+
 static NSDictionary *DOCollectEnvironmentDiagnostics(NSString *root)
 {
     NSMutableArray *paths = [NSMutableArray array];
@@ -142,5 +174,7 @@ static NSDictionary *DOCollectEnvironmentDiagnostics(NSString *root)
         @"quarantine_map_readable": @([map isKindOfClass:NSArray.class]),
         @"quarantine_entries": @([map isKindOfClass:NSArray.class] ? [map count] : 0),
         @"quarantine_relevant": relevant,
+        @"quarantine_conflicts": DODiagnosticConflicts(map, @"/var/mobile/.DopamineHideQuarantine",
+            @[@"/var/mobile/Library/Preferences/com.qq391160.cpucore.plist", @"/var/mobile/Library/Caches/CTHermes"]),
         @"logs": @[DODiagnosticLog(@"/var/mobile/Documents/noinject_log.txt"), DODiagnosticLog(@"/var/mobile/audit_log.txt")]};
 }

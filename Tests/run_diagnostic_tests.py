@@ -39,6 +39,29 @@ int main(int argc,char **argv) { @autoreleasepool {
  CHECK([DODiagnosticLog(log)[@"filtered_tail"] count]==80);
  CHECK(DODiagnosticLog([dir stringByAppendingPathComponent:@"absent.log"])[@"error"]!=nil);
  CHECK([NSJSONSerialization dataWithJSONObject:result options:0 error:NULL]!=nil);
+ NSString *q=[dir stringByAppendingPathComponent:@"quarantine"];
+ CHECK([[NSFileManager defaultManager] createDirectoryAtPath:q withIntermediateDirectories:NO attributes:nil error:NULL]);
+ NSString *saved=[q stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+ CHECK([original writeToFile:saved atomically:YES]);
+ NSArray *map=@[@{@"src":file,@"dst":saved}];
+ NSDictionary *conflicts=DODiagnosticConflicts(map,q,@[file]);
+ CHECK([conflicts[@"items"] count]==1);
+ CHECK([conflicts[@"items"][0][@"state"] isEqual:@"both_present"]);
+ CHECK([[NSData dataWithContentsOfFile:file] isEqual:original]);
+ CHECK([[NSData dataWithContentsOfFile:saved] isEqual:original]);
+ CHECK(unlink(file.fileSystemRepresentation)==0);
+ CHECK([DODiagnosticConflicts(map,q,@[file])[@"items"][0][@"state"] isEqual:@"quarantine_only"]);
+ CHECK(unlink(saved.fileSystemRepresentation)==0);
+ CHECK([DODiagnosticConflicts(map,q,@[file])[@"items"][0][@"state"] isEqual:@"both_missing"]);
+ CHECK([original writeToFile:file atomically:YES]);
+ CHECK([DODiagnosticConflicts(map,q,@[file])[@"items"][0][@"state"] isEqual:@"original_only"]);
+ CHECK([DODiagnosticConflicts(map,q,@[]) [@"items"] count]==0);
+ CHECK([DODiagnosticConflicts(@[@{@"src":file,@"dst":file}],q,@[file])[@"rejected_entries"] intValue]==1);
+ CHECK([DODiagnosticConflicts(@[@{@"src":file,@"dst":[q stringByAppendingPathComponent:@"../escape"]}],q,@[file])[@"rejected_entries"] intValue]==1);
+ CHECK([DODiagnosticConflicts(@[@1],q,@[file])[@"rejected_entries"] intValue]==1);
+ CHECK([DODiagnosticConflicts(@{},q,@[file])[@"status"] isEqual:@"unreadable_map"]);
+ CHECK([NSJSONSerialization dataWithJSONObject:conflicts options:0 error:NULL]!=nil);
+ CHECK([[NSData dataWithContentsOfFile:file] isEqual:original]);
  NSLog(@"PASS: %d read-only diagnostic assertions",count); return 0;
 }}
 '''
