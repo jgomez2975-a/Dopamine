@@ -54,7 +54,7 @@ static NSDictionary *DODiagnosticLog(NSString *path)
         NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         if (!text) text = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
         NSMutableArray *selected = [NSMutableArray array];
-        NSArray *needles = @[@"global_hide", @"global_restore", @"resurrect", @"watch_exit", @"appstate_check",
+        NSArray *needles = @[@"entry_guard_v1", @"entry_state_v2", @"global_hide", @"global_restore", @"resurrect", @"watch_exit", @"appstate_check",
             @"Sileo", @"sileo", @"ellekit", @"ElleKit", @".safe_mode", @"fakelib", @"DopamineAppHideRules"];
         for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
             for (NSString *needle in needles) {

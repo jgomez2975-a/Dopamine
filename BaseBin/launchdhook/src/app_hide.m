@@ -27,6 +27,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/mount.h>
+#include <time.h>
 
 #include <libjailbreak/libjailbreak.h>
 #include <xpc_private.h>
@@ -250,7 +251,9 @@ static void app_hide_log(NSString *msg)
 {
 	FILE *f = fopen("/var/mobile/Documents/noinject_log.txt", "a");
 	if (f) {
-		fprintf(f, "%s\n", msg.UTF8String);
+		struct timespec now = {0};
+		clock_gettime(CLOCK_REALTIME, &now);
+		fprintf(f, "[%lld.%03ld pid=%d] %s\n", (long long)now.tv_sec, now.tv_nsec / 1000000, getpid(), msg.UTF8String);
 		fclose(f);
 	}
 }
@@ -317,6 +320,7 @@ static int new_xpc_pipe_routine_reply(xpc_object_t reply)
 
 void app_hide_init(void)
 {
+	app_hide_log(@"entry_state_v2: launchdhook initialized");
 	// Save the originals, then GOT-rebind (NOT instruction-replace). Instruction
 	// replacement clears CS_VALID on arm64 and panics launchd (pid 1) during the
 	// jailbreak "protection" stage; the existing initXPCHooks() uses GOT rebind for

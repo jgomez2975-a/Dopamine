@@ -25,10 +25,12 @@ int main(int argc,char **argv) { @autoreleasepool {
  CHECK([DODiagnosticPath(broken)[@"target_stat_errno"] intValue]==ENOENT);
  CHECK(DODiagnosticMount(dir)[@"mounted_on"]!=nil);
  NSString *log=[dir stringByAppendingPathComponent:@"test.log"];
- [@"unrelated private line\nglobal_hide: refcount now 1\nglobal_restore: refcount 0\n" writeToFile:log atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+ [@"unrelated private line\nglobal_hide: refcount now 1\nglobal_restore: refcount 0\nentry_guard_v1: restore blocked\nentry_state_v2: launchdhook initialized\nentry_state_v2: pid_release result=0\n" writeToFile:log atomically:YES encoding:NSUTF8StringEncoding error:NULL];
  NSData *before=[NSData dataWithContentsOfFile:log];
  NSDictionary *result=DODiagnosticLog(log);
- CHECK([result[@"filtered_tail"] count]==2);
+ CHECK([result[@"filtered_tail"] count]==5);
+ CHECK([[result[@"filtered_tail"] componentsJoinedByString:@"\n"] containsString:@"entry_guard_v1"]);
+ CHECK([[result[@"filtered_tail"] componentsJoinedByString:@"\n"] containsString:@"entry_state_v2: launchdhook initialized"]);
  CHECK([[NSData dataWithContentsOfFile:log] isEqual:before]);
  CHECK([[NSData dataWithContentsOfFile:file] isEqual:original]);
  NSMutableString *large=[NSMutableString string];
