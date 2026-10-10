@@ -149,3 +149,7 @@
 "Mount_Input_Message" = "输入原始文件夹路径，将以只读方式绑定挂载到 /var/jb/mnt/ 下的副本。";
 "Error_Mount_Empty" = "请输入文件夹路径。";
 "Empty_Mount_List" = "还没有挂载。";
+
+"Button_Quarantine_Conflict" = "处理恢复冲突（保留两份）";
+"Quarantine_Conflict_Consent" = "只处理已确认的两处冲突：保留当前温控配置与 CTHermes 缓存，也保留隔离区旧副本。先持久备份完整恢复清单，再将已确认的冲突记录归档。不覆盖、不合并、不删除双方文件，不重启，也不会自动启动应用。这不等于旧内容已还原。";
+"Quarantine_Conflict_Result" = "请截图并导出诊断后停止。归档成功仅表示当前文件与旧副本均保留，不代表应用恢复或隐藏根因已修复。不要重复处理、删除备份、更新环境或重启。";

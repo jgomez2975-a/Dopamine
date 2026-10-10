@@ -24,12 +24,15 @@
 #import "DOReadOnlyDiagnostics.h"
 #import "DOJBEntryRecovery.h"
 #import "DOHelperTransition.h"
+#import "DOQuarantineConflictRecovery.h"
 
 @interface DOSettingsController ()
 - (void)exportEnvironmentDiagnosticsPressed;
 - (void)collectAndShareEnvironmentDiagnostics;
 - (void)repairJBEntryPressed;
 - (void)performJBEntryRecovery;
+- (void)quarantineConflictRecoveryPressed;
+- (void)performQuarantineConflictRecovery;
 - (void)helperTransitionPressed;
 - (void)helperTransitionRollbackPressed;
 - (void)confirmHelperTransition:(BOOL)rollback;
@@ -349,7 +352,8 @@
 
                 for (NSDictionary *button in @[
                     @{@"title":@"Button_Helper_Transition", @"action":@"helperTransitionPressed"},
-                    @{@"title":@"Button_Helper_Transition_Rollback", @"action":@"helperTransitionRollbackPressed"}]) {
+                    @{@"title":@"Button_Helper_Transition_Rollback", @"action":@"helperTransitionRollbackPressed"},
+                    @{@"title":@"Button_Quarantine_Conflict", @"action":@"quarantineConflictRecoveryPressed"}]) {
                     PSSpecifier *item = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
                     [item setProperty:button[@"title"] forKey:@"title"];
                     [item setProperty:[DOButtonCell class] forKey:@"cellClass"];
@@ -805,6 +809,37 @@
 
 #pragma mark - Button Actions
 
+- (void)quarantineConflictRecoveryPressed
+{
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Button_Quarantine_Conflict")
+        message:DOLocalizedString(@"Quarantine_Conflict_Consent") preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Continue") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [self performQuarantineConflictRecovery];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)performQuarantineConflictRecovery
+{
+    __block NSDictionary *result = @{@"status": @"environment_unavailable", @"changed": @NO};
+    DOEnvironmentManager *env = [DOEnvironmentManager sharedManager];
+    if (env.isJailbroken && env.isBootstrapped) {
+        @synchronized (env) {
+            [env runAsRoot:^{ [env runUnsandboxed:^{ result = DOResolveKnownQuarantineConflicts(); }]; }];
+        }
+    }
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"Dopamine-ConflictRecovery.plist"];
+    NSDictionary *record = @{@"date": NSDate.date.description, @"result": result};
+    BOOL recorded = [record writeToFile:path atomically:YES];
+    NSString *message = [NSString stringWithFormat:@"%@\n\nstatus=%@\nchanged=%@\nerrno=%@\nbackup=%@\nrecord_saved=%@",
+        DOLocalizedString(@"Quarantine_Conflict_Result"), result[@"status"], result[@"changed"] ?: @NO,
+        result[@"errno"] ?: @0, result[@"backup_directory"] ?: @"none", recorded ? @"yes" : @"no"];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Button_Quarantine_Conflict") message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Close") style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)helperTransitionPressed { [self confirmHelperTransition:NO]; }
 - (void)helperTransitionRollbackPressed { [self confirmHelperTransition:YES]; }
 
@@ -915,6 +950,8 @@
     report[@"diagnostic_schema"] = @1;
     NSDictionary *transition = [NSDictionary dictionaryWithContentsOfFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"Dopamine-HelperTransition.plist"]];
     if (transition) report[@"helper_transition"] = transition;
+    NSDictionary *conflictRecovery = [NSDictionary dictionaryWithContentsOfFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"Dopamine-ConflictRecovery.plist"]];
+    if (conflictRecovery) report[@"quarantine_conflict_recovery"] = conflictRecovery;
     NSData *recoveryData = [NSData dataWithContentsOfFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"Dopamine-JBEntryRecovery.json"]];
     if (recoveryData) {
         id recovery = [NSJSONSerialization JSONObjectWithData:recoveryData options:0 error:NULL];

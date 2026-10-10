@@ -32,6 +32,7 @@ jobs:
         run: |
           python3 Tests/run_app_hide_tests.py
           python3 Tests/run_diagnostic_tests.py
+          python3 Tests/run_conflict_recovery_tests.py
           python3 Tests/run_helper_crash_tests.py
           python3 Tests/run_helper_environment_tests.py
           python3 Tests/run_helper_transition_plan_tests.py

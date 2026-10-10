@@ -179,3 +179,7 @@
 "Helper_Transition_Consent" = "Backs up basebin/config.plist and adds only the exact jbctl helper path to the existing no-injection list. Other settings are preserved. Does not restart or update the environment. This is a controlled recovery test, not proof the crash is fixed.";
 "Helper_Transition_Rollback_Consent" = "Restores saved configuration only if it still matches our change. Backups are retained. If the original config was absent, writes an empty dictionary with a newer timestamp to clear the old cache. Does not restart.";
 "Helper_Transition_Result" = "Configuration result only, not runtime verification. Screenshot this result and export diagnostics. Do not update the environment, restart or repeatedly apply/roll back yet.";
+
+"Button_Quarantine_Conflict" = "Resolve restore conflicts (keep both copies)";
+"Quarantine_Conflict_Consent" = "Only handles the two confirmed conflicts. Keeps the current CPU configuration and CTHermes cache and their old quarantine copies. Persists the full journal backup before archiving selected conflict references. No overwrite, merge, data deletion, reboot or automatic app launch. This does not restore the old contents.";
+"Quarantine_Conflict_Result" = "Screenshot and export diagnostics, then stop. Archiving preserves both versions; it does not prove apps recovered or the hide root cause is fixed. Do not repeat, delete backups, update the environment or reboot.";
