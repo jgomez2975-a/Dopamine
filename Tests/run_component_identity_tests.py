@@ -36,7 +36,7 @@ int main(int argc,char **argv){@autoreleasepool{
  CHECK([DOComponentIdentity(root,root)[@"status"] isEqual:@"unavailable"]);
  NSString *hash=@"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
  NSMutableDictionary *components=[NSMutableDictionary dictionary];
- for(NSString *name in @[@"jbctl",@"launchdhook.dylib",@"systemhook.dylib"]){
+ for(NSString *name in @[@"jbctl",@"launchdhook.dylib",@"systemhook.dylib",@"libjailbreak.dylib"]){
   NSString *path=[base stringByAppendingPathComponent:name];
   CHECK([@"abc" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil]);
   CHECK([DOComponentHash(path)[@"sha256"] isEqual:hash]);

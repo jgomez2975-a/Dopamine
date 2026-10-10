@@ -55,7 +55,7 @@ static NSDictionary *DOComponentIdentity(NSString *root, NSString *bundlePath)
     }
     NSMutableDictionary *files = [NSMutableDictionary dictionary];
     BOOL known = YES, matches = YES;
-    for (NSString *name in @[@"jbctl",@"launchdhook.dylib",@"systemhook.dylib"]) {
+    for (NSString *name in @[@"jbctl",@"launchdhook.dylib",@"systemhook.dylib",@"libjailbreak.dylib"]) {
         id expected = components[name];
         NSDictionary *actual = DOComponentHash([[root stringByAppendingPathComponent:@"basebin"] stringByAppendingPathComponent:name]);
         BOOL valid = [expected isKindOfClass:NSString.class] && [expected length] == 64 && actual[@"sha256"] != nil;

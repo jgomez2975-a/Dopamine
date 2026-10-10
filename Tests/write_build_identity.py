@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tarfile
 
-COMPONENTS = ('jbctl', 'launchdhook.dylib', 'systemhook.dylib')
+COMPONENTS = ('jbctl', 'launchdhook.dylib', 'systemhook.dylib', 'libjailbreak.dylib')
 
 def identities(archive):
     result = {}
