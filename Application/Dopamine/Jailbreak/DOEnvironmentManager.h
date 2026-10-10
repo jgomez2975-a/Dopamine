@@ -50,8 +50,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)runUnsandboxed:(void (^)(void))unsandboxBlock;
 - (void)runAsRoot:(void (^)(void))rootBlock;
 
-- (void)respring;
-- (void)rebootUserspace;
+- (int)respring;
+- (int)rebootUserspace;
 - (void)rebootUserspaceAfterJailbreak;
 - (void)rebuildIconCache;
 - (void)refreshJailbreakApps;
@@ -69,7 +69,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (int)setFakelibMounted:(BOOL)mounted;
 - (int)setPrivatePrebootProtected:(BOOL)protected;
 - (BOOL)isJailbreakHidden;
-- (void)setJailbreakHidden:(BOOL)hidden;
+- (int)setJailbreakHidden:(BOOL)hidden;
 
 - (NSString *)injectionRulesPath;
 - (NSDictionary *)injectionRules;

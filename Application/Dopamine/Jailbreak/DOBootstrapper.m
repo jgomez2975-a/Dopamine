@@ -1,3 +1,4 @@
+#import "../../../Shared/JBEntryGuard.h"
 //
 //  Bootstrapper.m
 //  Dopamine
@@ -245,20 +246,10 @@ NSString *const bootstrapErrorDomain = @"BootstrapErrorDomain";
 
 - (NSError *)updateVarJbSymlink
 {
-    // Remove /var/jb as it might be wrong
-    NSError *error;
-    if (![self deleteSymlinkAtPath:@"/var/jb" error:&error]) {
-        if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"]) {
-            if (![[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:&error]) {
-                return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedReplacing userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Removing /var/jb directory failed with error: %@", error]}];
-            }
-        }
-        else {
-            return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedReplacing userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Removing /var/jb symlink failed with error: %@", error]}];
-        }
-    }
-
-    return [self createSymlinkAtPath:@"/var/jb" toPath:JBROOT_PATH(@"/") createIntermediateDirectories:YES];;
+    int result = jb_entry_ensure_visible("/var/jb", gSystemInfo.jailbreakInfo.rootPath);
+    if (result == 0) return nil;
+    return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedReplacing
+        userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"/var/jb entry verification failed (%d); existing entry preserved. Export diagnostics before repair.", result]}];
 }
 
 - (void)prepareBootstrapWithCompletion:(void (^)(NSError *))completion

@@ -7,6 +7,7 @@
 
 #import "DOEnvironmentManager.h"
 #import "../../../Shared/JBQuarantine.h"
+#import "../../../Shared/JBManualEntry.h"
 #import "UIImage+JPEG2000.h"
 
 #import <sys/sysctl.h>
@@ -345,6 +346,7 @@ extern char **environ;
     }
 
     char **argBuf = malloc((args.count + 4) * sizeof(char *));
+    if (!argBuf) return ENOMEM;
     argBuf[0] = strdup(JBROOT_PATH("/basebin/jbctl"));
     int i = 1;
     for (NSString *arg in args) {
@@ -362,10 +364,17 @@ extern char **environ;
     posix_spawnattr_t attr = NULL;
     posix_spawnattr_init(&attr);
      
-    int waitPipe[2];
+    int waitPipe[2] = {-1, -1};
     
     if (!needsLegacySolution) {
-        pipe(waitPipe);
+        if (pipe(waitPipe) != 0) {
+            int result = errno;
+            posix_spawnattr_destroy(&attr);
+            posix_spawn_file_actions_destroy(&act);
+            for (int y = 0; y < i; y++) free(argBuf[y]);
+            free(argBuf);
+            return result;
+        }
         posix_spawn_file_actions_adddup2(&act, waitPipe[0], 3);
     }
     else {
@@ -378,7 +387,7 @@ extern char **environ;
     [self runAsRoot:^{
         [self runUnsandboxed:^{
             r = posix_spawn(&pid, argBuf[0], &act, &attr, (char *const *)argBuf, (char *const *)environ);
-            if (needsLegacySolution) {
+            if (needsLegacySolution && r == 0 && pid > 0) {
                 kill(pid, SIGCONT);
             }
         }];
@@ -401,6 +410,7 @@ extern char **environ;
         close(waitPipe[1]);
     }
 
+    if (r != 0 || pid <= 0) return r > 0 ? r : EIO;
     return cmd_wait_for_exit(pid);
 }
 
@@ -422,31 +432,38 @@ extern char **environ;
 //
 // IMPORTANT: this must never run while the jailbreak is still being set up.
 // `finalize` calls rebootUserspace at the very end of a jailbreak run, and
-// DOBootstrapper deletes then re-creates the /var/jb symlink during bootstrap, so
+// Legacy bootstrap versions deleted then re-created /var/jb during setup, so
 // a bare "/var/jb is missing" probe can fire right in the middle of that. Calling
 // setJailbreakHidden:NO there is fatal: it spawns jbctl synchronously (with
 // --waitfor) before the jbserver is up, which hangs and ends in a watchdog reboot.
 // The jailbroken flag is the guard: it only turns on once the jailbreak is really
 // established, so before that we never touch the hidden state.
-- (void)ensureJailbreakVisibleBeforeRestart
+- (int)ensureJailbreakVisibleBeforeRestart
 {
-    if (!self.isJailbroken) return;
-    if (![self isJailbreakHidden]) return;
-
-    NSLog(@"[HideJailbreak] Jailbreak is hidden, unhiding before restart");
-    [self setJailbreakHidden:NO];
+    if (!self.isJailbroken) return 0; // Never call restoration during bootstrap.
+    __block int result = EPERM;
+    __block BOOL needsRestore = NO;
+    [self runAsRoot:^{ [self runUnsandboxed:^{
+        BOOL hidden = NO;
+        result = jb_manual_probe(@"/var/jb", JBROOT_PATH(@"/"), &hidden);
+        if (result == 0) needsRestore = hidden || auditPathState(hideMapPath()) != 0 || ![self isFakelibMounted];
+    }]; }];
+    if (result != 0) return result;
+    return needsRestore ? [self setJailbreakHidden:NO] : 0;
 }
 
-- (void)respring
+- (int)respring
 {
-    [self ensureJailbreakVisibleBeforeRestart];
-    [self spawnJbctlAsRootWithArgs:@[@"respring"]];
+    int result = [self ensureJailbreakVisibleBeforeRestart];
+    if (result != 0) { NSLog(@"manual_entry_v1: respring blocked=%d", result); return result; }
+    return [self spawnJbctlAsRootWithArgs:@[@"respring"]];
 }
 
-- (void)rebootUserspace
+- (int)rebootUserspace
 {
-    [self ensureJailbreakVisibleBeforeRestart];
-    [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
+    int result = [self ensureJailbreakVisibleBeforeRestart];
+    if (result != 0) { NSLog(@"manual_entry_v1: userspace restart blocked=%d", result); return result; }
+    return [self spawnJbctlAsRootWithArgs:@[@"reboot_userspace"]];
 }
 
 // Used by the jailbreak flow itself (right after a successful bootstrap). The
@@ -510,13 +527,13 @@ extern char **environ;
 
 - (NSError*)updateEnvironment
 {
+    int result = [self ensureJailbreakVisibleBeforeRestart];
+    if (result != 0) return [NSError errorWithDomain:@"Dopamine" code:result userInfo:@{NSLocalizedDescriptionKey:@"Environment verification failed; update was not staged."}];
     NSString *newBasebinTarPath = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:@"basebin.tar"];
-    int result = jbclient_platform_stage_jailbreak_update(newBasebinTarPath.fileSystemRepresentation);
-    if (result == 0) {
-        [self rebootUserspace];
-        return nil;
-    }
-    return [NSError errorWithDomain:@"Dopamine" code:result userInfo:nil];
+    result = jbclient_platform_stage_jailbreak_update(newBasebinTarPath.fileSystemRepresentation);
+    if (result == 0) result = [self rebootUserspace];
+    if (result == 0) return nil;
+    return [NSError errorWithDomain:@"Dopamine" code:result userInfo:@{NSLocalizedDescriptionKey:@"Update or restart failed; activation has not been verified."}];
 }
 
 - (void)updateJailbreakFromTIPA:(NSString *)tipaPath
@@ -1301,19 +1318,25 @@ extern char **environ;
     return ![[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"];
 }
 
-- (void)setJailbreakHidden:(BOOL)hidden
+- (int)setJailbreakHidden:(BOOL)hidden
 {
     if (hidden && ![self isJailbroken] && geteuid() != 0) {
-        [self runTrollStoreAction:@"hide-jailbreak"];
-        return;
+        return [self runTrollStoreAction:@"hide-jailbreak"];
     }
     
+    __block int operationResult = EPERM;
     void (^actionBlock)(void) = ^{
-        BOOL alreadyHidden = [self isJailbreakHidden];
-        if (hidden != alreadyHidden) {
+        BOOL alreadyHidden = NO;
+        operationResult = jb_manual_probe(@"/var/jb", JBROOT_PATH(@"/"), &alreadyHidden);
+        if (operationResult != 0) {
+            NSLog(@"manual_entry_v1: unexpected entry preserved=%d", operationResult);
+            return;
+        }
+        if (hidden != alreadyHidden || !hidden) {
             if (hidden) {
                 int auditResult = [self runJailbreakLibraryAudit];
                 if (auditResult != 0) {
+                    operationResult = auditResult;
                     NSLog(@"[HideJailbreak] audit failed (%d); stopped before entry removal", auditResult);
                     return;
                 }
@@ -1328,8 +1351,10 @@ extern char **environ;
                     [[NSData data] writeToFile:safeModePath atomically:YES];
 
                     [self unregisterJailbreakApps];
-                    [self setPrivatePrebootProtected:NO];
-                    [self setFakelibMounted:NO];
+                    operationResult = [self setPrivatePrebootProtected:NO];
+                    if (operationResult != 0) return;
+                    operationResult = [self setFakelibMounted:NO];
+                    if (operationResult != 0) return;
 
                     // RootHide-style: hide security.mac.amfi.developer_mode_status
                     // (1 -> 0, i.e. report "developer mode disabled" like a stock
@@ -1342,7 +1367,12 @@ extern char **environ;
 
                 [self hideJailbreakURLSchemes];
 
-                [[NSFileManager defaultManager] removeItemAtPath:@"/var/jb" error:nil];
+                NSString *retained = nil;
+                operationResult = jb_manual_hide(@"/var/jb", JBROOT_PATH(@"/"), &retained);
+                if (operationResult != 0) {
+                    NSLog(@"manual_entry_v1: hide stopped=%d retained=%@", operationResult, retained);
+                    return;
+                }
 
                 if ([self isJailbroken]) {
                     jbclient_platform_set_systemwide_domain_enabled(false);
@@ -1350,8 +1380,11 @@ extern char **environ;
                 }
             }
             else {
+                operationResult = jb_entry_ensure_visible("/var/jb", gSystemInfo.jailbreakInfo.rootPath);
+                if (operationResult != 0) return;
                 int restoreResult = [self restoreHiddenItems];
                 if (restoreResult != 0) {
+                    operationResult = restoreResult;
                     NSLog(@"[HideJailbreak] restore failed (%d); journal preserved", restoreResult);
                     return;
                 }
@@ -1363,9 +1396,8 @@ extern char **environ;
 
                 [self restoreJailbreakURLSchemes];
 
-                [[NSFileManager defaultManager] createSymbolicLinkAtPath:@"/var/jb"
-                                                     withDestinationPath:JBROOT_PATH(@"/")
-                                                                   error:nil];
+                operationResult = jb_entry_ensure_visible("/var/jb", gSystemInfo.jailbreakInfo.rootPath);
+                if (operationResult != 0) return;
 
                 if ([self isJailbroken]) {
                     NSString *safeModePath = JBROOT_PATH(@"/basebin/.safe_mode");
@@ -1373,8 +1405,10 @@ extern char **environ;
 
                     [self setForkfixEnabled:YES];
 
-                    [self setFakelibMounted:YES];
-                    [self setPrivatePrebootProtected:YES];
+                    operationResult = [self setFakelibMounted:YES];
+                    if (operationResult != 0) return;
+                    operationResult = [self setPrivatePrebootProtected:YES];
+                    if (operationResult != 0) return;
                     [self refreshJailbreakApps];
 
                     // Restore the real developer-mode state (1) that was hidden
@@ -1387,8 +1421,10 @@ extern char **environ;
         else if (hidden) {
             [self hideJailbreakURLSchemes];
             int auditResult = [self runJailbreakLibraryAudit];
+            operationResult = auditResult;
             if (auditResult != 0) NSLog(@"[HideJailbreak] audit failed: %d", auditResult);
         }
+        if (!hidden && operationResult == 0) operationResult = jb_entry_ensure_visible("/var/jb", gSystemInfo.jailbreakInfo.rootPath);
     };
     
     if ([self isJailbroken]) {
@@ -1399,6 +1435,7 @@ extern char **environ;
     else {
         actionBlock();
     }
+    return operationResult;
 }
 
 - (NSString *)accessibleKernelPath

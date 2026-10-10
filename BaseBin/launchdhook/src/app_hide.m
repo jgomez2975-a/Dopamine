@@ -1,3 +1,6 @@
+#ifndef JB_BUILD_COMMIT
+#define JB_BUILD_COMMIT "unknown"
+#endif
 // app_hide.m — RootHide-style jailbreak-level process hiding for "Hide for App".
 //
 // Ported from RootHide's libjailbreak/src/roothider/xpc_hook.m + blacklist.cpp.
@@ -320,7 +323,7 @@ static int new_xpc_pipe_routine_reply(xpc_object_t reply)
 
 void app_hide_init(void)
 {
-	app_hide_log(@"entry_state_v2: launchdhook initialized");
+	app_hide_log([NSString stringWithFormat:@"entry_state_v2: launchdhook initialized build=%s", JB_BUILD_COMMIT]);
 	// Save the originals, then GOT-rebind (NOT instruction-replace). Instruction
 	// replacement clears CS_VALID on arm64 and panics launchd (pid 1) during the
 	// jailbreak "protection" stage; the existing initXPCHooks() uses GOT rebind for

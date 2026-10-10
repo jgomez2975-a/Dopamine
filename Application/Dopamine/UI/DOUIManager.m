@@ -10,6 +10,8 @@
 #import "DOThemeManager.h"
 #import "DOTheme.h"
 #import "NSString+Version.h"
+#import "Settings/DOComponentIdentity.h"
+#import <libjailbreak/jbroot.h>
 #import <pthread.h>
 
 @implementation DOUIManager
@@ -94,7 +96,12 @@
     NSString *jailbrokenVersion = [[DOEnvironmentManager sharedManager] jailbrokenVersion];
     NSString *launchedVersion = [self getLaunchedReleaseTag];
     
-    return [launchedVersion numericalVersionRepresentation] > [jailbrokenVersion numericalVersionRepresentation];
+    long long bundled = [launchedVersion numericalVersionRepresentation];
+    long long running = [jailbrokenVersion numericalVersionRepresentation];
+    if (bundled != running) return bundled > running;
+    if (![[DOEnvironmentManager sharedManager] isBootstrapped]) return NO;
+    NSDictionary *identity = DOComponentIdentity(JBROOT_PATH(@"/"), NSBundle.mainBundle.bundlePath);
+    return DOComponentUpdateRequired(bundled, running, identity);
 }
 
 - (bool)launchedReleaseNeedsManualUpdate

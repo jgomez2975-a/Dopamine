@@ -1,11 +1,12 @@
 #pragma once
 #import <Foundation/Foundation.h>
+#import "DOComponentIdentity.h"
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <unistd.h>
 #include <errno.h>
 
-// Metadata only: no mutation, recursive traversal, or execution of package scripts.
+// Read-only metadata and fixed-component hashes; no recursive traversal or scripts.
 static NSDictionary *DODiagnosticPath(NSString *path)
 {
     NSMutableDictionary *result = [@{@"path": path} mutableCopy];
@@ -54,7 +55,7 @@ static NSDictionary *DODiagnosticLog(NSString *path)
         NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         if (!text) text = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
         NSMutableArray *selected = [NSMutableArray array];
-        NSArray *needles = @[@"audit_transaction_v2", @"audit_restore_v1", @"entry_guard_v1", @"entry_state_v2", @"global_hide", @"global_restore", @"resurrect", @"watch_exit", @"appstate_check",
+        NSArray *needles = @[@"manual_entry_v1", @"audit_transaction_v2", @"audit_restore_v1", @"entry_guard_v1", @"entry_state_v2", @"global_hide", @"global_restore", @"resurrect", @"watch_exit", @"appstate_check",
             @"Sileo", @"sileo", @"ellekit", @"ElleKit", @".safe_mode", @"fakelib", @"DopamineAppHideRules"];
         for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
             for (NSString *needle in needles) {
@@ -133,6 +134,7 @@ static NSDictionary *DOCollectEnvironmentDiagnostics(NSString *root)
         }
     }
     return @{@"root": root ?: @"<unavailable>", @"euid": @(geteuid()), @"paths": paths,
+        @"component_identity": DOComponentIdentity(root, NSBundle.mainBundle.bundlePath),
         @"mounts": @[DODiagnosticMount(@"/usr/lib"), DODiagnosticMount(@"/var/jb")],
         @"rule_summary": ruleSummary,
         @"quarantine_map_readable": @([map isKindOfClass:NSArray.class]),

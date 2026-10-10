@@ -945,8 +945,15 @@
 - (void)hideUnhideJailbreakPressed
 {
     DOEnvironmentManager *envManager = [DOEnvironmentManager sharedManager];
-    [envManager setJailbreakHidden:!envManager.isJailbreakHidden];
+    int result = [envManager setJailbreakHidden:!envManager.isJailbreakHidden];
     [self reloadSpecifiers];
+    if (result != 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"操作未完成"
+            message:[NSString stringWithFormat:@"已停止后续操作，错误码：%d。请导出环境诊断；不要反复切换开关或删除异常目录。", result]
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_Close") style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+    }
 }
 
 - (void)removeJailbreakPressed
