@@ -1,0 +1,29 @@
+name: "JB entry race: isolated regression tests"
+on:
+  push:
+    branches: ["research/jb-entry-race"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: entry-race-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  reproduce:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replay legacy filesystem interleavings
+        run: python3 Tests/reproduce_entry_race.py --output "$RUNNER_TEMP/entry-evidence"
+      - name: Test candidate non-destructive link guard
+        run: python3 Tests/run_entry_guard_tests.py
+      - name: Verify existing recovery transaction
+        run: python3 Tests/run_recovery_tests.py
+      - name: Save tested commit
+        run: git rev-parse HEAD > "$RUNNER_TEMP/entry-evidence/COMMIT.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: entry-race-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/entry-evidence
+          if-no-files-found: error
