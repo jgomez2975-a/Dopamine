@@ -16,13 +16,15 @@ static uid_t testUID(void){return pretendUID;}
 #import "DOHelperTransition.h"
 #define CHECK(x) do {if(!(x)){NSLog(@"FAIL %d %s",__LINE__,#x);return 1;}count++;}while(0)
 int main(int argc,char **argv){@autoreleasepool{(void)argc;int count=0;
- NSString *dir=[[NSString stringWithUTF8String:argv[1]] stringByResolvingSymlinksInPath];fixturePrefix=[dir stringByAppendingString:@"/"];
+ char resolvedFixture[PATH_MAX];CHECK(realpath(argv[1],resolvedFixture)!=NULL);
+ NSString *dir=[NSString stringWithUTF8String:resolvedFixture];fixturePrefix=[dir stringByAppendingString:@"/"];
  NSString *root=[dir stringByAppendingPathComponent:@"procursus"],*entry=[dir stringByAppendingPathComponent:@"jb"];
  fixtureEntry=entry.fileSystemRepresentation;
  CHECK(mkdir(root.fileSystemRepresentation,0700)==0);CHECK(symlink(root.fileSystemRepresentation,fixtureEntry)==0);
  pretendUID=501;CHECK([DOHelperTransition(root,nil)[@"status"] isEqual:@"root_access_unavailable"]);pretendUID=0;
  CHECK([DOHelperTransition(nil,nil)[@"status"] isEqual:@"root_unavailable"]);
- CHECK([DOHelperTransition(root,nil)[@"status"] isEqual:@"invalid_basebin"]);
+ NSDictionary *missingBase=DOHelperTransition(root,nil);NSLog(@"missing-base result: %@",missingBase);
+ CHECK([missingBase[@"status"] isEqual:@"invalid_basebin"]);
  NSString *base=[root stringByAppendingPathComponent:@"basebin"],*helper=[base stringByAppendingPathComponent:@"jbctl"];
  CHECK(mkdir(base.fileSystemRepresentation,0700)==0);
  CHECK([DOHelperTransition(root,nil)[@"status"] isEqual:@"invalid_helper"]);

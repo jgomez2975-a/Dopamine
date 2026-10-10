@@ -32,7 +32,7 @@ static NSDictionary *DOHelperTransition(NSString *root, NSString *rollbackDirect
         if (![rollbackDirectory isKindOfClass:NSString.class] ||
             ![rollbackDirectory.stringByDeletingLastPathComponent isEqual:base] ||
             ![rollbackDirectory.lastPathComponent hasPrefix:@".DopamineHelperTransition-"] ||
-            ![rollbackDirectory isEqual:rollbackDirectory.stringByStandardizingPath] ||
+            !JBHelperTransitionPathIsClean(rollbackDirectory) ||
             lstat(rollbackDirectory.fileSystemRepresentation, &metadata) != 0 || !S_ISDIR(metadata.st_mode))
             return @{@"status": @"invalid_backup_directory"};
         return JBTransitionRollback(config, rollbackDirectory);

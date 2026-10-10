@@ -4,6 +4,20 @@
 #define JB_TRANSITION_ROOT_PREFIX @"/private/preboot/"
 #endif
 
+// Lexical validation only: Foundation path standardization may remove /private
+// based on existing filesystem aliases. Keep realpath's exact spelling instead.
+static inline BOOL JBHelperTransitionPathIsClean(NSString *path)
+{
+    if (![path isKindOfClass:NSString.class] || ![path hasPrefix:@"/"] ||
+        [path rangeOfCharacterFromSet:[NSCharacterSet characterSetWithRange:NSMakeRange(0, 1)]].location != NSNotFound) return NO;
+    NSArray *parts = [path componentsSeparatedByString:@"/"];
+    for (NSUInteger i = 1; i < parts.count; i++) {
+        NSString *part = parts[i];
+        if (!part.length || [part isEqual:@"."] || [part isEqual:@".."]) return NO;
+    }
+    return parts.count > 1;
+}
+
 // Pure preparation only. The caller must snapshot, persist a backup and perform
 // guarded writes separately. Never silently replace malformed existing config:
 // the old launchd reader assumes every ProcessBlacklist member is a string.
@@ -11,7 +25,7 @@ static inline NSDictionary *JBHelperTransitionPlan(NSData *original, NSString *r
 {
     if (![root isKindOfClass:NSString.class] || ![root hasPrefix:JB_TRANSITION_ROOT_PREFIX] ||
         ![root.lastPathComponent isEqual:@"procursus"] ||
-        ![root isEqual:root.stringByStandardizingPath])
+        !JBHelperTransitionPathIsClean(root))
         return @{@"status": @"invalid_root"};
     if (original.length > 256 * 1024) return @{@"status": @"config_too_large"};
     NSDictionary *config = @{};
