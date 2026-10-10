@@ -1,3 +1,4 @@
+#include "../../../Shared/JBHelperEnvironment.h"
 //
 //  EnvironmentManager.m
 //  Dopamine
@@ -386,7 +387,7 @@ extern char **environ;
 
     [self runAsRoot:^{
         [self runUnsandboxed:^{
-            r = posix_spawn(&pid, argBuf[0], &act, &attr, (char *const *)argBuf, (char *const *)environ);
+            r = posix_spawn(&pid, argBuf[0], &act, &attr, (char *const *)argBuf, jb_helper_environment());
             if (needsLegacySolution && r == 0 && pid > 0) {
                 kill(pid, SIGCONT);
             }

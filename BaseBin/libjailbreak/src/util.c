@@ -1,4 +1,5 @@
 #include "util.h"
+#include "../../../Shared/JBHelperEnvironment.h"
 #include "primitives.h"
 #include "info.h"
 #include "kernel.h"
@@ -956,6 +957,7 @@ int jbctl_earlyboot(mach_port_t earlyBootServer, ...)
 	for (int i = 1; i < argc-1; i++) {
 		argsArr[i] = va_arg(args, const char *);
 	}
+	va_end(args);
 	argsArr[argc-1] = "earlyboot";
 	argsArr[argc] = NULL;
 
@@ -963,7 +965,7 @@ int jbctl_earlyboot(mach_port_t earlyBootServer, ...)
 	posix_spawnattr_init(&attr);
 	posix_spawnattr_set_registered_ports_np(&attr, (mach_port_t[]){earlyBootServer, MACH_PORT_NULL, MACH_PORT_NULL}, 3);
 	pid_t spawnedPid = 0;
-	int r = posix_spawn(&spawnedPid, jbctlPath, NULL, &attr, (char *const *)argsArr, NULL);
+	int r = posix_spawn(&spawnedPid, jbctlPath, NULL, &attr, (char *const *)argsArr, jb_helper_environment());
 	posix_spawnattr_destroy(&attr);
 	if (r != 0) return r;
 	return cmd_wait_for_exit(spawnedPid);

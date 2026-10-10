@@ -8,8 +8,8 @@ LDFLAGS = -larchive -lbsm -L../.build -F ../_external/frameworks -lchoma
 sign: $(TARGET)
 	@ldid -Cadhoc -S $<
 
-$(TARGET): $(wildcard src/*.c src/*.m src/*.S ../_external/modules/litehook/src/*.c)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+$(TARGET): $(wildcard src/*.c src/*.m src/*.S ../_external/modules/litehook/src/*.c) ../../Shared/JBHelperEnvironment.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(filter-out %.h,$^)
 
 clean:
 	@rm -f $(TARGET)
