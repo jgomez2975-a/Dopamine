@@ -7,7 +7,7 @@
 #define DO_QC_ROOT @"/var/mobile/.DopamineHideQuarantine"
 #endif
 #ifndef DO_QC_SOURCES
-#define DO_QC_SOURCES @[@"/var/mobile/Library/Preferences/com.qq391160.cpucore.plist", @"/var/mobile/Library/Caches/CTHermes"]
+#define DO_QC_SOURCES @[@"/var/mobile/Library/Preferences/com.qq391160.cpucore.plist", @"/var/mobile/Library/Caches/CTHermes", @"/var/mobile/Library/Caches/mediaanalysisd-service"]
 #endif
 
 static inline BOOL DOQCSameObject(NSString *path, NSDictionary *identity)

@@ -107,6 +107,40 @@ int main(int argc,char **argv){@autoreleasepool{(void)argc;int count=0;
  CHECK([encode(@{@"bad":@YES}) writeToFile:mapPath atomically:YES]);
  CHECK([DOResolveKnownQuarantineConflicts()[@"status"] isEqual:@"invalid_map"]);
  CHECK([readData(live) isEqual:currentData]);CHECK([readData(old) isEqual:oldData]);
+
+ // Third allowlisted directory: preserve both PersonPromoter versions, unrelated
+ // references and the complete journal; reject non-directory or missing backup.
+ NSString *media=[dir stringByAppendingPathComponent:@"mediaanalysisd-service"];
+ NSString *mediaOld=[fixtureRoot stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+ fixtureSources=@[live,cache,media];
+ CHECK(mkdir(media.fileSystemRepresentation,0700)==0);
+ CHECK(mkdir(mediaOld.fileSystemRepresentation,0700)==0);
+ NSString *mediaCurrentChild=[media stringByAppendingPathComponent:@"PersonPromoter"];
+ NSString *mediaOldChild=[mediaOld stringByAppendingPathComponent:@"PersonPromoter"];
+ NSData *mediaCurrentData=encode(@{@"NumberOfFacesProcessedOnLastRun":@1029});
+ NSData *mediaOldData=encode(@{@"NumberOfFacesProcessedOnLastRun":@552});
+ CHECK([mediaCurrentData writeToFile:mediaCurrentChild atomically:YES]);
+ CHECK([mediaOldData writeToFile:mediaOldChild atomically:YES]);
+ NSArray *mediaMap=@[@{@"src":media,@"dst":mediaOld},map[2]];
+ NSData *mediaMapBytes=encode(mediaMap);
+ CHECK([mediaMapBytes writeToFile:mapPath atomically:YES]);
+ r=DOResolveKnownQuarantineConflicts();
+ CHECK([r[@"status"] isEqual:@"conflicts_archived_current_kept"]);
+ CHECK([r[@"archived_items"] count]==1);
+ CHECK([[NSArray arrayWithContentsOfFile:mapPath] isEqual:@[map[2]]]);
+ CHECK([readData(mediaCurrentChild) isEqual:mediaCurrentData]);
+ CHECK([readData(mediaOldChild) isEqual:mediaOldData]);
+ CHECK([readData(unrelated) isEqual:currentData]);
+ CHECK([readData(unrelatedOld) isEqual:oldData]);
+ CHECK([readData([r[@"backup_directory"] stringByAppendingPathComponent:@"exchange.plist"]) isEqual:mediaMapBytes]);
+ CHECK(![r[@"original_contents_restored"] boolValue]);
+ CHECK([DOResolveKnownQuarantineConflicts()[@"status"] isEqual:@"no_known_conflicts"]);
+ // A regular file cannot masquerade as the newly allowed directory.
+ CHECK([encode(@[@{@"src":media,@"dst":old}]) writeToFile:mapPath atomically:YES]);
+ CHECK([DOResolveKnownQuarantineConflicts()[@"status"] isEqual:@"unexpected_target_type"]);
+ CHECK([readData(old) isEqual:oldData]);
+ CHECK([encode(@[@{@"src":media,@"dst":[fixtureRoot stringByAppendingPathComponent:NSUUID.UUID.UUIDString]}]) writeToFile:mapPath atomically:YES]);
+ CHECK([DOResolveKnownQuarantineConflicts()[@"status"] isEqual:@"target_not_both_present"]);
  printf("PASS: %d production conflict archival assertions\n",count);return 0;
 }}
 """

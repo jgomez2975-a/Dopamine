@@ -175,6 +175,6 @@ static NSDictionary *DOCollectEnvironmentDiagnostics(NSString *root)
         @"quarantine_entries": @([map isKindOfClass:NSArray.class] ? [map count] : 0),
         @"quarantine_relevant": relevant,
         @"quarantine_conflicts": DODiagnosticConflicts(map, @"/var/mobile/.DopamineHideQuarantine",
-            @[@"/var/mobile/Library/Preferences/com.qq391160.cpucore.plist", @"/var/mobile/Library/Caches/CTHermes"]),
+            @[@"/var/mobile/Library/Preferences/com.qq391160.cpucore.plist", @"/var/mobile/Library/Caches/CTHermes", @"/var/mobile/Library/Caches/mediaanalysisd-service"]),
         @"logs": @[DODiagnosticLog(@"/var/mobile/Documents/noinject_log.txt"), DODiagnosticLog(@"/var/mobile/audit_log.txt")]};
 }
