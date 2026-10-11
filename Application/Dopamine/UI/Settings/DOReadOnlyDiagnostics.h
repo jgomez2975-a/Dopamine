@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #import "DOComponentIdentity.h"
 #import "DOHelperCrashDiagnostics.h"
+#include "../../../../Shared/JBGlobalHideAdmission.h"
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <unistd.h>
@@ -166,11 +167,17 @@ static NSDictionary *DOCollectEnvironmentDiagnostics(NSString *root)
             }
         }
     }
+    const char *admissionReason = NULL;
+    int admissionResult = jb_global_hide_admission(root.fileSystemRepresentation, &admissionReason);
+    NSDictionary *admission = @{@"errno": @(admissionResult),
+        @"component": admissionReason ? [NSString stringWithUTF8String:admissionReason] : @"",
+        @"scope": @"known_installed_components_only", @"general_writer_isolation": @NO};
     return @{@"root": root ?: @"<unavailable>", @"euid": @(geteuid()), @"paths": paths,
         @"component_identity": DOComponentIdentity(root, NSBundle.mainBundle.bundlePath),
         @"helper_crashes": DOCollectHelperCrashes(@[@"/var/mobile/Library/Logs/CrashReporter", @"/Library/Logs/CrashReporter"]),
         @"mounts": @[DODiagnosticMount(@"/usr/lib"), DODiagnosticMount(@"/var/jb")],
         @"rule_summary": ruleSummary,
+        @"global_hide_admission": admission,
         @"quarantine_map_readable": @([map isKindOfClass:NSArray.class]),
         @"quarantine_entries": @([map isKindOfClass:NSArray.class] ? [map count] : 0),
         @"quarantine_relevant": relevant,

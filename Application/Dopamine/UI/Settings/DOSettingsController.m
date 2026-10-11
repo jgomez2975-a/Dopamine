@@ -1621,6 +1621,14 @@
     NSString *bundleID = appInfo[@"bundleID"];
 
     BOOL noInject = ![appInfo[@"noInject"] boolValue];
+    if (noInject) {
+        int admission = jb_global_hide_admission(JBROOT_PATH(@"/").fileSystemRepresentation, NULL);
+        if (admission != 0) {
+            [self presentRulesError:[NSError errorWithDomain:NSPOSIXErrorDomain code:admission
+                userInfo:@{NSLocalizedDescriptionKey:DOLocalizedString(@"Global_Hide_Writer_Blocked")}]];
+            return;
+        }
+    }
     NSError *error = nil;
     if (![[DOEnvironmentManager sharedManager] setEnvironmentNoInject:noInject forBundleID:bundleID error:&error]) {
         [self presentRulesError:error];

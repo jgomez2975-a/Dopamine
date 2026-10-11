@@ -141,6 +141,16 @@ int main(int argc,char **argv){@autoreleasepool{
  CHECK([env rebootUserspace]==EIO && spawnCalls==0);
  CHECK(auditPathState(entry)==1); // entry is restored; retry must still finish mount
  reset();CHECK([env rebootUserspace]==0 && mounted && spawnCalls>0);
+ // Installed writer blocks before audit, unregister, mount or entry mutation.
+ reset();
+ NSString *usr=[root stringByAppendingPathComponent:@"usr"];
+ NSString *bin=[usr stringByAppendingPathComponent:@"bin"];
+ [[NSFileManager defaultManager] createDirectoryAtPath:bin withIntermediateDirectories:YES attributes:nil error:NULL];
+ NSString *writer=[bin stringByAppendingPathComponent:@"CTHermesChargeTool"];
+ CHECK([[@"fixture" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:writer atomically:YES]);
+ CHECK([env setJailbreakHidden:YES]==EBUSY);
+ CHECK(audits==0 && spawnCalls==0 && mountCalls==0 && refreshCalls==0 && auditPathState(entry)==1);
+ CHECK(unlink(writer.fileSystemRepresentation)==0);
  reset();auditError=EIO;CHECK([env setJailbreakHidden:YES]==EIO);
  CHECK(auditPathState(entry)==1 && mountCalls==0);
  reset();mountError=EIO;CHECK([env setJailbreakHidden:YES]==EIO && auditPathState(entry)==1);

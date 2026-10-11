@@ -3,6 +3,7 @@
 #import <Foundation/Foundation.h>
 #include <stdio.h>
 #include "JBEntryGuard.h"
+#include "JBGlobalHideAdmission.h"
 #ifndef JB_MANUAL_RENAME
 #define JB_MANUAL_RENAME renamex_np
 #endif
@@ -30,6 +31,8 @@ static inline int jb_manual_probe(NSString *entry, NSString *root, BOOL *hidden)
 static inline int jb_manual_hide(NSString *entry, NSString *root, NSString **retained)
 {
     if (retained) *retained = nil;
+    int admission = jb_global_hide_admission(root.fileSystemRepresentation, NULL);
+    if (admission != 0) return admission;
     BOOL hidden = NO;
     int result = jb_manual_probe(entry, root, &hidden);
     if (result != 0 || hidden) return result;

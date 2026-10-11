@@ -60,10 +60,11 @@ source=r'''#import <Foundation/Foundation.h>
 #include <sys/wait.h>
 #include <sys/mount.h>
 #include <unistd.h>
-static int hideError,restoreError;
+static int hideError,restoreError,admissionError,hideCalls,restoreCalls;
+static int app_hide_admission(void){return admissionError;}
 static dispatch_semaphore_t released;
-static int app_hide_do_hide(void){return hideError;}
-static int app_hide_do_restore(void){return restoreError;}
+static int app_hide_do_hide(void){hideCalls++;return hideError;}
+static int app_hide_do_restore(void){restoreCalls++;return restoreError;}
 static void app_hide_log(NSString *s){if(released && [s containsString:@"pid_release"])dispatch_semaphore_signal(released);}
 // Kernel identity/role probes are mocked. The child process exit source and
 // delayed callback below are real libdispatch operations.
@@ -74,6 +75,16 @@ static int app_hide_get_app_state(pid_t pid){(void)pid;return 3;}
 ''' + globals_ + functions + restart + r'''
 int main(void){@autoreleasepool {
  int count=0;
+ admissionError=EBUSY;
+ void *blocked=(void *)1;
+ CHECK(app_hide_global_hide()==EBUSY);
+ CHECK(app_hide_begin_spawn(&blocked)==EBUSY && blocked==NULL);
+ CHECK(gVisibility.references==0 && gVisibility.phase==JB_VISIBLE && !gVisibility.busy);
+ CHECK(hideCalls==0 && restoreCalls==0 && !gLegacyLease.held);
+ admissionError=EACCES;blocked=(void *)1;
+ CHECK(app_hide_begin_spawn(&blocked)==EACCES && blocked==NULL);
+ CHECK(hideCalls==0 && restoreCalls==0 && gVisibility.references==0);
+ admissionError=0;
  CHECK(app_hide_global_hide()==0);CHECK(app_hide_global_hide()==0);
  CHECK(gVisibility.references==1);CHECK(app_hide_global_restore()==0);CHECK(!app_hide_is_currently_hidden());
  void *a=NULL,*b=NULL;

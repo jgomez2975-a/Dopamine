@@ -39,6 +39,7 @@
 #include "jbserver/jbserver_local.h"
 #include "../../../Shared/JBEntryGuard.h"
 #include "../../../Shared/JBVisibilityState.h"
+#include "../../../Shared/JBGlobalHideAdmission.h"
 
 extern void systemwide_domain_set_enabled(bool enabled);
 
@@ -374,8 +375,19 @@ static int app_hide_run_jbctl(const char *command, const char *arg)
 // Actual (reversible) hide/restore bodies, shared by the no-inject refcount
 // path and the "jailbreak app resurrection" path.
 
+static int app_hide_admission(void)
+{
+    const char *reason = NULL;
+    int result = jb_global_hide_admission(gSystemInfo.jailbreakInfo.rootPath, &reason);
+    if (result != 0)
+        app_hide_log([NSString stringWithFormat:@"global_hide_admission_v1: denied errno=%d component=%s; no hide mutation", result, reason ?: "probe_error"]);
+    return result;
+}
+
 static int app_hide_do_hide(void)
 {
+    int admission = app_hide_admission();
+    if (admission != 0) return admission;
     const char *rootPath = gSystemInfo.jailbreakInfo.rootPath;
     if (!rootPath || !rootPath[0]) return EINVAL;
     struct stat root;
@@ -455,6 +467,8 @@ static int app_hide_transition_result(const char *operation, int result)
 
 int app_hide_global_hide(void)
 {
+    int admission = app_hide_admission();
+    if (admission != 0) return admission;
     return app_hide_transition_result("legacy_hide", jb_visibility_acquire(&gVisibility,
         &gLegacyLease, app_hide_apply_hide, app_hide_apply_restore, NULL));
 }
@@ -469,6 +483,8 @@ int app_hide_begin_spawn(void **context)
 {
     if (!context) return EINVAL;
     *context = NULL;
+    int admission = app_hide_admission();
+    if (admission != 0) return admission;
     DOAppHideLease *owner = [DOAppHideLease new];
     if (!owner) return ENOMEM;
     int result = jb_visibility_acquire(&gVisibility, &owner->lease,

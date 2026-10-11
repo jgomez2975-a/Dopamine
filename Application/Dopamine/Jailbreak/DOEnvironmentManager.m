@@ -1327,6 +1327,13 @@ extern char **environ;
     
     __block int operationResult = EPERM;
     void (^actionBlock)(void) = ^{
+        if (hidden) {
+            operationResult = jb_global_hide_admission(JBROOT_PATH(@"/").fileSystemRepresentation, NULL);
+            if (operationResult != 0) {
+                NSLog(@"global_hide_admission_v1: manual hide denied=%d before audit", operationResult);
+                return;
+            }
+        }
         BOOL alreadyHidden = NO;
         operationResult = jb_manual_probe(@"/var/jb", JBROOT_PATH(@"/"), &alreadyHidden);
         if (operationResult != 0) {
