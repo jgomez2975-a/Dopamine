@@ -21,6 +21,8 @@ bool hidejb_rules_is_self_hidden(void);
 // allocation bug when this complex string-matching body is inlined into the
 // hooks (it ends up calling strncmp with the hook's `flags`/`mode` args).
 bool hidejb_rules_path_is_jailbreak(const char *path);
+// Read-only matching relative to a directory fd; unresolved queries pass through.
+bool hidejb_rules_path_at_is_jailbreak(int fd, const char *path);
 
 // True when `dirpath` is a directory that could contain entries which
 // hidejb_rules_path_is_jailbreak() would hide. Used by the readdir hook to skip

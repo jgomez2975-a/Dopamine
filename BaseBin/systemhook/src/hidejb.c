@@ -240,7 +240,7 @@ static int hidejb_lstat(const char *path, struct stat *buf)
 static int (*orig_fstatat)(int, const char *, struct stat *, int);
 static int hidejb_fstatat(int fd, const char *path, struct stat *buf, int flag)
 {
-	if (gEnabled && hidejb_rules_path_is_jailbreak(path)) { errno = ENOENT; return -1; }
+	if (gEnabled && hidejb_rules_path_at_is_jailbreak(fd, path)) { errno = ENOENT; return -1; }
 	return orig_fstatat(fd, path, buf, flag);
 }
 
@@ -256,7 +256,7 @@ static int hidejb_access(const char *path, int mode)
 static int (*orig_faccessat)(int, const char *, int, int);
 static int hidejb_faccessat(int fd, const char *path, int mode, int flag)
 {
-	if (gEnabled && hidejb_rules_path_is_jailbreak(path)) { errno = ENOENT; return -1; }
+	if (gEnabled && hidejb_rules_path_at_is_jailbreak(fd, path)) { errno = ENOENT; return -1; }
 	return orig_faccessat(fd, path, mode, flag);
 }
 
@@ -279,7 +279,7 @@ static ssize_t hidejb_readlink(const char *path, char *buf, size_t bufsize)
 static ssize_t (*orig_readlinkat)(int, const char *, char *, size_t);
 static ssize_t hidejb_readlinkat(int fd, const char *path, char *buf, size_t bufsize)
 {
-	if (gEnabled && hidejb_rules_path_is_jailbreak(path)) { errno = ENOENT; return -1; }
+	if (gEnabled && hidejb_rules_path_at_is_jailbreak(fd, path)) { errno = ENOENT; return -1; }
 	return orig_readlinkat(fd, path, buf, bufsize);
 }
 

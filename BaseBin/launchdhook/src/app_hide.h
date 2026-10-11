@@ -31,6 +31,8 @@ int app_hide_prepare_userspace_restart(void);
 void app_hide_cancel_userspace_restart(void);
 // A successful begin transfers one owned lease to watch_exit or cancel_spawn.
 int app_hide_begin_spawn(void **context);
+// Result attribution only; never changes rules, visibility, or spawn policy.
+void app_hide_record_spawn_denial(const char *path, int role, int result);
 void app_hide_cancel_spawn(void *context);
 void app_hide_watch_exit(pid_t pid, void *context);
 

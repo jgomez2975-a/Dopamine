@@ -21,7 +21,8 @@ functions=''.join(function(x) for x in [
  'int app_hide_prepare_userspace_restart(', 'void app_hide_cancel_userspace_restart('])
 spawn=(repo/'BaseBin/launchdhook/src/spawn_hook.m').read_text(encoding='utf8')
 assert 'if (restoreResult != 0) return restoreResult;' in spawn
-assert 'if (hideResult != 0) return hideResult;' in spawn
+assert 'app_hide_record_spawn_denial(path, darwinRole, hideResult);' in spawn
+assert 'return hideResult;' in spawn
 assert 'app_hide_watch_exit(childPid, hideContext)' in spawn
 assert 'app_hide_check_role_after_spawn' not in spawn
 a=spawn.index('if (!strcmp(path, executablePath))')

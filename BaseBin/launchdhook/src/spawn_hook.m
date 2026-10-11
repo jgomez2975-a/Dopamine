@@ -373,7 +373,10 @@ int __posix_spawn_hook(pid_t *restrict pid, const char *restrict path,
 			// Foreground launch: global hide + bare spawn + restore on exit.
 			void *hideContext = NULL;
 			int hideResult = app_hide_begin_spawn(&hideContext);
-			if (hideResult != 0) return hideResult;
+			if (hideResult != 0) {
+				app_hide_record_spawn_denial(path, darwinRole, hideResult);
+				return hideResult;
+			}
 			pid_t *blacklistedPidp = (pid_t *)app_hide_alloc_pid();
 			int r = __posix_spawn_orig_wrapper(blacklistedPidp, path, desc, argv, (char *const *)envp);
 			pid_t childPid = *blacklistedPidp;

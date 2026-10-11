@@ -479,6 +479,34 @@ int app_hide_global_restore(void)
         &gLegacyLease, app_hide_apply_restore, NULL));
 }
 
+void app_hide_record_spawn_denial(const char *path, int role, int result)
+{
+    int savedErrno = errno;
+    @autoreleasepool {
+        NSString *executable = path ? [NSString stringWithUTF8String:path] : nil;
+        NSString *identifier = @"unknown";
+        if (executable) {
+            NSRange range = [executable rangeOfString:@".app/"];
+            if (range.location != NSNotFound) {
+                NSString *bundle = [executable substringToIndex:range.location + 4];
+                id value = [NSDictionary dictionaryWithContentsOfFile:
+                    [bundle stringByAppendingPathComponent:@"Info.plist"]][@"CFBundleIdentifier"];
+                // Reject control characters rather than letting bundle metadata forge log lines.
+                NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:
+                    @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_"];
+                if ([value isKindOfClass:NSString.class] && [value length] > 0 &&
+                    [value length] <= 255 && [value rangeOfCharacterFromSet:allowed.invertedSet].location == NSNotFound)
+                    identifier = value;
+            }
+        }
+        // No argv, environment, full container paths, or preference contents in the log.
+        app_hide_log([NSString stringWithFormat:
+            @"app_hide_spawn_v1: bundle=%@ mode=noinject_global role=%d stage=begin_denied result=%d child_spawned=0",
+            identifier, role, result]);
+    }
+    errno = savedErrno;
+}
+
 int app_hide_begin_spawn(void **context)
 {
     if (!context) return EINVAL;
