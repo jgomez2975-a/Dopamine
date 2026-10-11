@@ -39,6 +39,7 @@
 #include "jbserver/jbserver_local.h"
 #include "../../../Shared/JBEntryGuard.h"
 #include "../../../Shared/JBVisibilityState.h"
+#include "../../../Shared/JBVisibilityWatchdog.h"
 #include "../../../Shared/JBGlobalHideAdmission.h"
 
 extern void systemwide_domain_set_enabled(bool enabled);
@@ -322,6 +323,8 @@ static int new_xpc_pipe_routine_reply(xpc_object_t reply)
 	return orig_xpc_pipe_routine_reply(reply);
 }
 
+static void app_hide_start_watchdog(void);
+
 void app_hide_init(void)
 {
 	app_hide_log([NSString stringWithFormat:@"entry_state_v2: launchdhook initialized build=%s", JB_BUILD_COMMIT]);
@@ -335,6 +338,9 @@ void app_hide_init(void)
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)xpc_dictionary_create_reply, (void *)new_xpc_dictionary_create_reply, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)xpc_pipe_routine_reply, (void *)new_xpc_pipe_routine_reply, NULL);
 	litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, (void *)bind, (void *)new_bind, NULL);
+    // Delay startup reconciliation until launchd's initial bootstrap work ends.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC),
+        dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ app_hide_start_watchdog(); });
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +348,7 @@ void app_hide_init(void)
 // ---------------------------------------------------------------------------
 
 static JBVisibilityState gVisibility = JB_VISIBILITY_INITIALIZER;
+static JBVisibilityWatchdog gIdleWatchdog;
 // The compatibility XPC switch has its own lease; it cannot release a spawned
 // app's lease. Spawn callbacks retain one DOAppHideLease per launch.
 static JBVisibilityLease gLegacyLease;
@@ -438,6 +445,39 @@ static int app_hide_do_restore(void)
 	else result = jb_entry_link_matches("/var/jb", &root);
 	app_hide_log([NSString stringWithFormat:@"entry_guard_v1: restore postflight errno=%d", result]);
 	return result;
+}
+
+static int app_hide_watchdog_restore(void *context)
+{
+    (void)context;
+    return app_hide_do_restore();
+}
+
+static void app_hide_start_watchdog(void)
+{
+    static dispatch_once_t once;
+    static dispatch_source_t timer;
+    dispatch_once(&once, ^{
+        timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+            dispatch_queue_create("com.lf.dopamine.hide-reconcile", DISPATCH_QUEUE_SERIAL));
+        if (!timer) { app_hide_log(@"entry_reconcile_v1: timer allocation failed"); return; }
+        dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+            5 * NSEC_PER_SEC, NSEC_PER_SEC);
+        dispatch_source_set_event_handler(timer, ^{
+            @autoreleasepool {
+                // No filesystem mutation before the bootstrap root is known.
+                if (!gSystemInfo.jailbreakInfo.rootPath || !gSystemInfo.jailbreakInfo.rootPath[0]) return;
+                bool attempted = false;
+                int result = jb_visibility_reconcile_idle(&gVisibility, &gIdleWatchdog,
+                    app_hide_watchdog_restore, NULL, &attempted);
+                if (attempted)
+                    app_hide_log([NSString stringWithFormat:
+                        @"entry_reconcile_v1: result=%d recovery_attempted=%d failures=%u limit=3",
+                        result, 1, gIdleWatchdog.consecutiveFailures]);
+            }
+        });
+        dispatch_resume(timer);
+    });
 }
 
 static int app_hide_apply_hide(void *context)
@@ -711,44 +751,71 @@ static int app_hide_get_app_state(pid_t pid)
 	return (int)app_state;
 }
 
+// Metadata failures are not proof of death. A generation change proves PID
+// reuse; otherwise only ESRCH (or the kernel exit event) releases the lease.
+static bool app_hide_pid_has_exited(pid_t pid, int version)
+{
+    if (pid <= 1) return true;
+    int savedErrno = errno;
+    int current = proc_get_pidversion(pid);
+    if (version > 0 && current > 0 && current != version) { errno = savedErrno; return true; }
+    bool exited = kill(pid, 0) != 0 && errno == ESRCH;
+    errno = savedErrno;
+    return exited;
+}
+
 void app_hide_watch_exit(pid_t pid, void *context)
 {
     if (!context) return;
     DOAppHideLease *owner = (__bridge_transfer DOAppHideLease *)context;
     int version = proc_get_pidversion(pid);
-    // Both callbacks retain the SAME lease, so only the first release can
-    // decrement the reference count. PID reuse cannot release a newer lease.
+    dispatch_queue_t queue = dispatch_queue_create("com.lf.dopamine.hide-owner", DISPATCH_QUEUE_SERIAL);
+    __block dispatch_source_t source = nil, timer = nil;
+    __block bool retired = false;
+    // All monitors for this owner run on one serial queue. The shared lease
+    // remains the authority, so another owner's reference is never decremented.
     void (^releaseOnce)(void) = ^{
+        if (retired) return;
+        retired = true;
+        if (version > 0) app_hide_remove_pid(pid, version);
         app_hide_transition_result("pid_release", jb_visibility_release(&gVisibility,
             &owner->lease, app_hide_apply_restore, NULL));
+        if (source) { dispatch_source_cancel(source); source = nil; }
+        if (timer) { dispatch_source_cancel(timer); timer = nil; }
     };
-    if (pid <= 0 || version == 0) { releaseOnce(); return; }
-    dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC,
-        (uintptr_t)pid, DISPATCH_PROC_EXIT,
-        dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
-    if (!source) {
-        app_hide_log(@"entry_state_v2: exit monitor allocation failed; releasing lease");
+    if (pid <= 1) { releaseOnce(); return; }
+    source = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, (uintptr_t)pid, DISPATCH_PROC_EXIT, queue);
+    timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+    if (!source && !timer) {
+        app_hide_log(@"entry_state_v2: exit monitors unavailable; releasing lease; hiding not guaranteed");
         releaseOnce();
         return;
     }
-    dispatch_source_set_event_handler(source, ^{
-        app_hide_remove_pid(pid, version);
-        releaseOnce();
-        dispatch_source_cancel(source);
-    });
-    dispatch_source_set_registration_handler(source, ^{
-        if (proc_get_pidversion(pid) != version) {
-            app_hide_remove_pid(pid, version);
-            releaseOnce();
-            dispatch_source_cancel(source);
-        }
-    });
-    dispatch_resume(source);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC),
-        dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            if (proc_get_pidversion(pid) != version) { releaseOnce(); return; }
-            int appState = app_hide_get_app_state(pid);
-            app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d", pid, appState]);
-            if (appState > 0 && appState != 1) releaseOnce();
+    if (source) {
+        dispatch_source_set_event_handler(source, releaseOnce);
+        dispatch_source_set_registration_handler(source, ^{
+            if (app_hide_pid_has_exited(pid, version)) releaseOnce();
         });
+    }
+    if (timer) {
+        dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+            5 * NSEC_PER_SEC, NSEC_PER_SEC);
+        dispatch_source_set_event_handler(timer, ^{
+            if (app_hide_pid_has_exited(pid, version)) releaseOnce();
+        });
+    }
+    // Resume on the owner queue: an already-exited process cannot race the
+    // setup thread and cancel/release a still-suspended companion source.
+    dispatch_async(queue, ^{
+        if (source) dispatch_resume(source);
+        if (timer) dispatch_resume(timer);
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC), queue, ^{
+        if (retired) return;
+        if (app_hide_pid_has_exited(pid, version)) { releaseOnce(); return; }
+        int appState = app_hide_get_app_state(pid);
+        app_hide_log([NSString stringWithFormat:@"appstate_check: pid %d app_state=%d (advisory only)", pid, appState]);
+        // State5 insight: background-role guesses are not process exit events.
+        // Never restore globally just because a live app changed role.
+    });
 }

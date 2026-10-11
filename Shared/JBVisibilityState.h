@@ -9,7 +9,9 @@
  * calling an operation: jbctl synchronously re-enters launchd's spawn hook.
  * Contending acquisitions/restores return EBUSY, rather than blocking launchd.
  * A final lease release during an operation is drained by that operation's
- * owner before it publishes idle. No detached retries or unbounded loops.
+ * owner before it publishes idle. These transitions never detach retries or
+ * loop unboundedly. The optional watchdog separately retries owned idle failures
+ * with a fixed budget, using this same busy/reference/restart exclusion.
  */
 typedef enum { JB_VISIBLE, JB_HIDDEN, JB_VISIBILITY_FAILED } JBVisibilityPhase;
 typedef struct { bool held; } JBVisibilityLease;

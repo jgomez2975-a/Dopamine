@@ -51,6 +51,7 @@ jobs:
           python3 Tests/run_global_hide_admission_tests.py
           python3 Tests/run_spawn_scope_tests.py
           python3 Tests/run_path_at_tests.py
+          python3 Tests/run_state5_reconcile_tests.py
           python3 Tests/reproduce_entry_race.py --output "$RUNNER_TEMP/entry-evidence"
 
       - name: Cache SwiftPM
