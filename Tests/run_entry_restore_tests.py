@@ -8,11 +8,20 @@ repo = Path(__file__).resolve().parents[1]
 src = (repo/'BaseBin/launchdhook/src/app_hide.m').read_text(encoding='utf8')
 helper = src.split('static int app_hide_run_jbctl(', 1)[1].split('// Actual (reversible)', 1)[0]
 helper = 'static int app_hide_run_jbctl(' + helper
-body = src.split('static int app_hide_do_restore(void)', 1)[1].split('static void app_hide_start_watchdog(void)', 1)[0]
-body = 'static int app_hide_do_restore(void)' + body
+# Extract exactly the restoration definition, not adjacent watchdog adapters.
+a = src.index('static int app_hide_do_restore(void)\n{')
+b = src.index('{', a)
+depth = 1
+i = b + 1
+while depth:
+ if src[i] == '{': depth += 1
+ elif src[i] == '}': depth -= 1
+ i += 1
+body = src[a:i]
 assert 'unlink(' not in body and 'symlink(' not in body
 assert 'jb_entry_ensure_visible' in body
 # This fixture compiles only restoration, not adjacent lifecycle callbacks.
+assert 'app_hide_watchdog_restore' not in body
 assert 'app_hide_start_watchdog' not in body
 assert 'jb_visibility_reconcile_idle' not in body
 assert 'return result;' in helper
